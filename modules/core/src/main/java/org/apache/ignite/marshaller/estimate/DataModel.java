@@ -140,4 +140,14 @@ public class DataModel {
             }
         }
     }
+
+    /**
+     *
+     */
+    public static class FieldInfo {
+
+        private String className;
+
+        private Object value;
+    }
 }
