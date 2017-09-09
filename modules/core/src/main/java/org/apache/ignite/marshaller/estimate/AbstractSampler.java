@@ -19,18 +19,23 @@ package org.apache.ignite.marshaller.estimate;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.util.Map;
-import org.apache.ignite.IgniteBinary;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.IgniteException;
 import org.apache.ignite.binary.BinaryObjectBuilder;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.lang.IgnitePredicate;
 
 /**
  * Abstract {@code Sampler} implementation
  */
 public abstract class AbstractSampler implements Sampler {
+    /** */
+    private final SampleFactory sampleFactory;
+
+    protected AbstractSampler(SampleFactory sampleFactory) {
+        this.sampleFactory = sampleFactory;
+    }
+
     /** {@inheritDoc} */
     @Override public Object[] sample(DataModel... dataModels) throws SamplingException {
         if (dataModels == null || dataModels.length == 0)
@@ -40,7 +45,7 @@ public abstract class AbstractSampler implements Sampler {
 
         for (int i = 0; i < samples.length; i++) {
             if (dataModels[i] == null)
-                throw new SamplingException("dataModel #" + i + " is null");
+                throw new SamplingException("Bad dataModels item found [dataModel#" + i + " = null]");
 
             samples[i] = sample(dataModels[i]);
         }
@@ -58,7 +63,6 @@ public abstract class AbstractSampler implements Sampler {
     protected abstract Object sample(DataModel dataModel) throws SamplingException;
 
     /**
-     *
      * @param sample
      * @param fieldStatsMap
      * @param index
@@ -76,7 +80,7 @@ public abstract class AbstractSampler implements Sampler {
             return sample;
 
         for (Class cls = sample.getClass(); cls != Object.class; cls = cls.getSuperclass()) {
-            for (Field field : cls.getDeclaredFields()) {
+            for (java.lang.reflect.Field field : cls.getDeclaredFields()) {
                 if (field.getType().isPrimitive())
                     continue;
 
@@ -142,7 +146,91 @@ public abstract class AbstractSampler implements Sampler {
     }
 
     /**
-     *
+     * @param sample
+     * @param dataModel
+     * @param parentFieldName
+     * @param nullPredicate
+     * @return
+     * @throws SamplingException
+     */
+    protected Sample sampleFields(
+        Sample sample,
+        DataModel dataModel,
+        String parentFieldName,
+        IgnitePredicate<DataModel.FieldStats> nullPredicate) throws SamplingException {
+
+        if (sample.className().startsWith("java."))
+            return sample;
+
+        for (Sample.Field field : sample.fields()) {
+            if (field.type().isPrimitive())
+                continue;
+
+            final String statsFieldName = parentFieldName != null ?
+                parentFieldName + "." + field.name() :
+                field.name();
+
+            DataModel.FieldStats stats = null;
+
+            if (dataModel.fieldStatsMap() != null)
+                stats = dataModel.fieldStatsMap().get(statsFieldName);
+
+            if (nullPredicate.apply(stats)) {
+                field.value(null);
+
+                continue;
+            }
+
+            if (String.class == field.type()) {
+                if (stats != null && stats.averageSize() != null)
+                    field.value(new String(new char[stats.averageSize()]));
+                else if (field.value() == null)
+                    throw new SamplingException(
+                        "No fieldStat or averageSize for string field '" + statsFieldName
+                            + "' in dataModel[className = " + dataModel.className() + "]");
+            }
+
+            if (field.type().getName().startsWith("java.lang."))
+                continue;
+
+            if (field.type().isArray()) {
+                if (stats == null || stats.averageSize() == null) {
+                    throw new SamplingException(
+                        "No fieldStat or averageSize for array field '" + statsFieldName
+                            + "' in dataModel[className = " + dataModel.className() + "]");
+                }
+
+                final Class<?> elementType = field.type().getComponentType();
+
+                final Object arrayObj = Array.newInstance(elementType, stats.averageSize());
+
+                if (!elementType.isPrimitive()) {
+                    final Object[] array = (Object[])arrayObj;
+
+                    for (int i = 0; i < array.length; i++) {
+                        array[i] = newInstance(elementType);
+
+                        sampleFields(new ReflectionSample(array[i]), dataModel, statsFieldName, nullPredicate);
+                    }
+                }
+
+                field.value(arrayObj);
+
+                continue;
+            }
+
+            if (field.value() == null) {
+                final Object value = newInstance(field.type());
+
+                sampleFields(new ReflectionSample(value), dataModel, statsFieldName, nullPredicate);
+
+                field.value(value);
+            }
+        }
+        return sample;
+    }
+
+    /**
      * @param builder
      * @param fieldStatsMap
      * @param index
@@ -159,39 +247,13 @@ public abstract class AbstractSampler implements Sampler {
         return null; // FIXME
     }
 
-    /**
-     *
-     * @param className
-     * @param binary
-     * @return
-     * @throws SamplingException
-     */
-    protected BinaryObjectBuilder newBuilder(String className, IgniteBinary binary) throws SamplingException {
-        try {
-            return binary.builder(className);
-        }
-        catch (IgniteException e) {
-            throw new SamplingException(e);
-        }
+    protected Sample createSample(DataModel dataModel) throws SamplingException {
+        // FIXME
+        //return new ReflectionSample(newInstance(dataModel.className()));
+        return sampleFactory.createSample(dataModel);
     }
 
     /**
-     *
-     * @param className
-     * @return
-     * @throws SamplingException
-     */
-    protected Object newInstance(String className) throws SamplingException {
-        try {
-            return U.newInstance(className);
-        }
-        catch (IgniteCheckedException e) {
-            throw new SamplingException(e);
-        }
-    }
-
-    /**
-     *
      * @param cls
      * @return
      * @throws SamplingException
@@ -212,13 +274,12 @@ public abstract class AbstractSampler implements Sampler {
     }
 
     /**
-     *
      * @param field
      * @param obj
      * @return
      * @throws SamplingException
      */
-    private Object getValue(Field field, Object obj) throws SamplingException {
+    private Object getValue(java.lang.reflect.Field field, Object obj) throws SamplingException {
         boolean accessible = field.isAccessible();
 
         field.setAccessible(true);
@@ -236,13 +297,12 @@ public abstract class AbstractSampler implements Sampler {
     }
 
     /**
-     *
      * @param field
      * @param obj
      * @param value
      * @throws SamplingException
      */
-    private void setValue(Field field, Object obj, Object value) throws SamplingException {
+    private void setValue(java.lang.reflect.Field field, Object obj, Object value) throws SamplingException {
         boolean accessible = field.isAccessible();
 
         field.setAccessible(true);

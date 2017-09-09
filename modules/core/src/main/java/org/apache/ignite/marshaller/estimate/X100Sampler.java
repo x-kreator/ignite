@@ -17,21 +17,33 @@
 
 package org.apache.ignite.marshaller.estimate;
 
+import org.apache.ignite.lang.IgnitePredicate;
+
 /**
  * {@code X100Sampler} is a {@code Sampler} implementation which makes arrays of 100 sampled instances for each data
  * model considering their field stats.
  */
 public class X100Sampler extends AbstractSampler {
+    public X100Sampler(SampleFactory sampleFactory) {
+        super(sampleFactory);
+    }
+
     /** {@inheritDoc} */
     @Override protected Object sample(DataModel dataModel) throws SamplingException {
         final Object[] samples = new Object[100];
 
         for (int i = 0; i < samples.length; i++) {
+            final int index = i;
+
             samples[i] = sampleFields(
-                newInstance(dataModel.className()),
-                dataModel.fieldStatsMap(),
-                i,
-                null);
+                createSample(dataModel),
+                dataModel,
+                null,
+                new IgnitePredicate<DataModel.FieldStats>() {
+                    @Override public boolean apply(DataModel.FieldStats stats) {
+                        return stats != null && stats.nullsPercent() != null && stats.nullsPercent() < index;
+                    }
+                }).sample();
         }
 
         return samples;

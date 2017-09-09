@@ -35,9 +35,10 @@ public class MarshalledSizeEstimatorTest extends GridCommonAbstractTest {
 
             final Marshaller marshaller = ignite.configuration().getMarshaller();
 
-            final MarshalledSizeEstimator estimator = new SamplingMarshalledSizeEstimator(new X100Sampler());
+            final MarshalledSizeEstimator estimator = new SamplingMarshalledSizeEstimator(
+                new X100Sampler(new SampleFactoryImpl(ignite.binary())));
 
-            final long estimatedSize = estimator.estimate(
+            final long estimatedSize1 = estimator.estimate(
                 marshaller,
                 new DataModel()
                     .className("org.apache.ignite.marshaller.estimate.MarshalledSizeEstimatorTest$ModelClassAlpha")
@@ -77,7 +78,9 @@ public class MarshalledSizeEstimatorTest extends GridCommonAbstractTest {
                         .nullsPercent(5))
             );
 
-            log.info("Estimated size: " + estimatedSize);
+            log.info("Estimated size #1: " + estimatedSize1);
+
+
         }
         finally {
             stopAllGrids();

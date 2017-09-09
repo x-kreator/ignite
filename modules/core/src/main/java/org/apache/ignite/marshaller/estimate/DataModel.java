@@ -34,50 +34,110 @@ public class DataModel {
     /** Field names mapped to their stats */
     private Map<String, FieldStats> fieldStatsMap = new HashMap<>();
 
+    /**
+     * Field names mapped to their types. If not {@code null}, BinarySample will be created, and ReflectionSample
+     * otherwise.
+     */
+    private Map<String, String> fieldTypes;
+
+    /**
+     * @return
+     */
     public String className() {
         return className;
     }
 
+    /**
+     * @param className
+     * @return
+     */
     public DataModel className(String className) {
         this.className = className;
 
         return this;
     }
 
+    /**
+     * @return
+     */
     public long count() {
         return count;
     }
 
+    /**
+     * @param count
+     * @return
+     */
     public DataModel count(long count) {
         this.count = count;
 
         return this;
     }
 
+    /**
+     * @return
+     */
     public Map<String, FieldStats> fieldStatsMap() {
         return Collections.unmodifiableMap(fieldStatsMap);
     }
 
+    /**
+     * @param fieldStatsMap
+     * @return
+     */
     public DataModel fieldStatsMap(Map<String, FieldStats> fieldStatsMap) {
         this.fieldStatsMap = new HashMap<>(fieldStatsMap);
 
         return this;
     }
 
+    /**
+     * @param name
+     * @param stats
+     * @return
+     */
     public DataModel setFieldStats(String name, FieldStats stats) {
         fieldStatsMap.put(name, stats);
 
         return this;
     }
 
+    /**
+     * @param name
+     * @return
+     */
     public DataModel removeFieldStats(String name) {
         fieldStatsMap.remove(name);
 
         return this;
     }
 
+    /**
+     * @return
+     */
     public DataModel clearFieldStats() {
         fieldStatsMap.clear();
+
+        return this;
+    }
+
+    /**
+     * @return
+     */
+    public Map<String, String> fieldTypes() {
+        return fieldTypes == null ? null : Collections.unmodifiableMap(fieldTypes);
+    }
+
+    /**
+     * @param name
+     * @param typeName
+     * @return
+     */
+    public DataModel setFieldType(String name, String typeName) {
+        if (fieldTypes == null)
+            fieldTypes = new HashMap<>();
+
+        fieldTypes.put(name, typeName);
 
         return this;
     }
@@ -86,9 +146,10 @@ public class DataModel {
      *
      */
     public static class FieldStats {
-
+        /** Percent of {@code null} values of related field in sampled objects. */
         private Integer nullsPercent;
 
+        /** Average size of string or array field values in sampled objects. */
         private Integer averageSize;
 
         public Integer nullsPercent() {
@@ -139,15 +200,5 @@ public class DataModel {
                     throw new IllegalArgumentException("averageSize must be null or integer value greater or equal 0");
             }
         }
-    }
-
-    /**
-     *
-     */
-    public static class FieldInfo {
-
-        private String className;
-
-        private Object value;
     }
 }
