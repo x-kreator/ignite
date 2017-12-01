@@ -296,6 +296,9 @@ public class DataStreamProcessorSelfTest extends GridCommonAbstractTest {
             assert s2 == 0 && s3 == 0 : "Incorrect entries count [s2=" + s2 + ", s3=" + s3 + ']';
         }
         finally {
+            Thread.sleep(5000);
+            Thread.sleep(1000);
+
             stopAllGrids();
         }
     }

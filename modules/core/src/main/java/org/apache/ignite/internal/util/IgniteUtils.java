@@ -175,6 +175,7 @@ import org.apache.ignite.compute.ComputeTaskCancelledException;
 import org.apache.ignite.compute.ComputeTaskName;
 import org.apache.ignite.compute.ComputeTaskTimeoutException;
 import org.apache.ignite.configuration.AddressResolver;
+import org.apache.ignite.configuration.FailureProcessingPolicy;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.events.EventType;
 import org.apache.ignite.internal.GridKernalContext;
@@ -253,6 +254,7 @@ import static org.apache.ignite.IgniteSystemProperties.IGNITE_NO_DISCO_ORDER;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_SSH_HOST;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_SSH_USER_NAME;
 import static org.apache.ignite.IgniteSystemProperties.getBoolean;
+import static org.apache.ignite.configuration.FailureProcessingPolicy.NOOP;
 import static org.apache.ignite.events.EventType.EVTS_ALL;
 import static org.apache.ignite.events.EventType.EVTS_ALL_MINUS_METRIC_UPDATE;
 import static org.apache.ignite.events.EventType.EVT_NODE_METRICS_UPDATED;
@@ -1346,6 +1348,58 @@ public abstract class IgniteUtils {
         ThreadMXBean mxBean = ManagementFactory.getThreadMXBean();
 
         return !F.isEmpty(mxBean.findDeadlockedThreads());
+    }
+
+    /**
+     * @param ctx Context.
+     */
+    public static void processSystemFailure(GridKernalContext ctx) {
+        FailureProcessingPolicy flrPlc = ctx.config().getFailureProcessingPolicy();
+
+        switch (flrPlc) {
+            case RESTART_JVM:
+                U.warn(ctx.config().getGridLogger(), "Restarting JVM according to configured failure processing policy.");
+
+                restartJvm();
+
+                break;
+
+            case STOP:
+                U.warn(ctx.config().getGridLogger(), "Stopping local node according to configured failure processing policy.");
+
+                stopNode(ctx);
+
+                break;
+
+            default:
+                assert flrPlc == NOOP : "Unsupported failure processing policy value: " + flrPlc;
+        }
+    }
+
+    /**
+     * Restarts JVM.
+     */
+    private static void restartJvm() {
+        new Thread(
+            new Runnable() {
+                @Override public void run() {
+                    G.restart(true);
+                }
+            }
+        ).start();
+    }
+
+    /**
+     * Stops local node.
+     */
+    private static void stopNode(final GridKernalContext ctx) {
+        new Thread(
+            new Runnable() {
+                @Override public void run() {
+                    G.stop(ctx.igniteInstanceName(), true);
+                }
+            }
+        ).start();
     }
 
     /**

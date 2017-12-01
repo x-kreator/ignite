@@ -106,6 +106,7 @@ import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
+import org.apache.ignite.internal.util.worker.SystemWorker;
 import org.apache.ignite.lang.IgniteBiInClosure;
 import org.apache.ignite.lang.IgniteProductVersion;
 import org.apache.ignite.lang.IgniteUuid;
@@ -2000,6 +2001,7 @@ public class GridCachePartitionExchangeManager<K, V> extends GridCacheSharedMana
      * Exchange future thread. All exchanges happen only by one thread and next
      * exchange will not start until previous one completes.
      */
+    @SystemWorker
     private class ExchangeWorker extends GridWorker {
         /** Future queue. */
         private final LinkedBlockingDeque<CachePartitionExchangeWorkerTask> futQ =
@@ -2188,9 +2190,9 @@ public class GridCachePartitionExchangeManager<K, V> extends GridCacheSharedMana
             }
             finally {
                 if (!stop) {
-                    log.warning("Unexpected ExchangeWorker death!");
+                    log.warning("Unexpected ExchangeWorker stopping!");
 
-                    onExchangeWorkerDeath();
+                    U.processSystemFailure(cctx.kernalContext());
                 }
             }
         }
@@ -2490,53 +2492,6 @@ public class GridCachePartitionExchangeManager<K, V> extends GridCacheSharedMana
         }
     }
 
-    /**
-     *
-     */
-    private void onExchangeWorkerDeath() {
-        FailureProcessingPolicy flrPlc = cctx.gridConfig().getFailureProcessingPolicy();
-
-        switch (flrPlc) {
-            case RESTART_JVM:
-                U.warn(log, "Restarting JVM according to configured failure processing policy.");
-
-                restartJvm();
-
-                break;
-
-            case STOP:
-                U.warn(log, "Stopping local node according to configured failure processing policy.");
-
-                stopNode();
-
-                break;
-
-            default:
-                assert flrPlc == NOOP : "Unsupported failure processing policy value: " + flrPlc;
-        }
-    }
-
-    /** Restarts JVM. */
-    private void restartJvm() {
-        new Thread(
-            new Runnable() {
-                @Override public void run() {
-                    G.restart(true);
-                }
-            }
-        ).start();
-    }
-
-    /** Stops local node. */
-    private void stopNode() {
-        new Thread(
-            new Runnable() {
-                @Override public void run() {
-                    G.stop(cctx.igniteInstanceName(), true);
-                }
-            }
-        ).start();
-    }
 
     /**
      * Partition resend timeout object.

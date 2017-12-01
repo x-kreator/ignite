@@ -21,7 +21,10 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import org.apache.ignite.IgniteInterruptedException;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
+import org.apache.ignite.internal.IgniteKernal;
+import org.apache.ignite.internal.IgnitionEx;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -55,6 +58,9 @@ public abstract class GridWorker implements Runnable {
 
     /** */
     private final Object mux = new Object();
+
+    /** Whether or not this worker is annotated system worker. */
+    private final boolean isAnnotatedSysWorker = getClass().isAnnotationPresent(SystemWorker.class);
 
     /**
      * Creates new grid worker with given parameters.
@@ -98,6 +104,8 @@ public abstract class GridWorker implements Runnable {
         if (log.isDebugEnabled())
             log.debug("Grid runnable started: " + name);
 
+        log.warning("+++++ worker started: " + name + ", thread: " + Thread.currentThread().getName() + "]");
+
         try {
             // Special case, when task gets cancelled before it got scheduled.
             if (isCancelled)
@@ -106,6 +114,9 @@ public abstract class GridWorker implements Runnable {
             // Listener callback.
             if (lsnr != null)
                 lsnr.onStarted(this);
+
+            if (name.startsWith("partition-exchanger"))
+                return;
 
             body();
         }
@@ -142,7 +153,16 @@ public abstract class GridWorker implements Runnable {
             if (lsnr != null)
                 lsnr.onStopped(this);
 
-            if (log.isDebugEnabled())
+
+            if (isSystemWorker()) {
+                final IgniteKernal kernal = IgnitionEx.gridx(igniteInstanceName);
+                if (!kernal.isStopping()) {
+                    log.warning("Grid system runnable finished unexpectedly: " + name);
+
+                    U.processSystemFailure(kernal.context());
+                }
+            }
+            else if (log.isDebugEnabled())
                 if (isCancelled)
                     log.debug("Grid runnable finished due to cancellation: " + name);
                 else if (runner.isInterrupted())
@@ -172,6 +192,13 @@ public abstract class GridWorker implements Runnable {
      */
     protected void cleanup() {
         /* No-op. */
+    }
+
+    /**
+     * @return {@code true} if {@code this} runnable is system worker, and {@code false} otherwise.
+     */
+    protected boolean isSystemWorker() {
+        return isAnnotatedSysWorker;
     }
 
     /**
