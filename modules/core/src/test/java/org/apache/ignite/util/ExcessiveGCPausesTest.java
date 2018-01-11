@@ -52,6 +52,8 @@ public class ExcessiveGCPausesTest extends GridCommonAbstractTest {
 
         installGCMonitoring();
 
+        Ignite ignite = startGrid(0);
+
         //byte[] bytes1 = new byte[2000000000];
 
         //log.info("bytes length: " + bytes1.length);
@@ -93,10 +95,13 @@ public class ExcessiveGCPausesTest extends GridCommonAbstractTest {
 
         logMemInfo();
 
-        Thread.sleep(1000);
+        log.info("***** sleeping 100000...");
+        Thread.sleep(100000);
 
         beat.interrupt();
         beat.join();
+
+        stopAllGrids(); // TODO in finally section!
     }
 
     private int memInfoCnt = 0;
