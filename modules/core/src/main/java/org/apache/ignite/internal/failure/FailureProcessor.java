@@ -58,7 +58,7 @@ public class FailureProcessor {
         if (hnd == null)
             hnd = DFLT_FAILURE_HND;
 
-        FailureAction act = hnd.onFailure(failureCtx);
+        FailureAction act = hnd.onFailure(failureCtx, null);
 
         if (act == FailureAction.NOOP)
             return;

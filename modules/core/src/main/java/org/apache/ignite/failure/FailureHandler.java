@@ -18,6 +18,7 @@
 package org.apache.ignite.failure;
 
 import org.apache.ignite.configuration.IgniteConfiguration;
+import org.apache.ignite.internal.GridKernalContext;
 
 /**
  * Provides facility to handle failures by custom user implementations,
@@ -26,7 +27,8 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 public interface FailureHandler {
     /**
      * @param failureCtx Failure context.
+     * @param ctx Kernal context.
      * @return Reaction to failure.
      */
-    public FailureAction onFailure(FailureContext failureCtx);
+    public FailureAction onFailure(FailureContext failureCtx, GridKernalContext ctx);
 }

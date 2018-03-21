@@ -23,23 +23,11 @@ import org.apache.ignite.failure.FailureHandler;
 import org.apache.ignite.internal.GridKernalContext;
 
 /**
- * Default implementation of {@link FailureHandler}
+ * Just ignores any failure. It's useful for tests and debugging.
  */
-public class DefaultFailureHandler implements FailureHandler {
+public class NoOpFailureHandler implements FailureHandler {
     /** {@inheritDoc} */
-    @Override public FailureAction onFailure(FailureContext failureCtx,
-        GridKernalContext ctx) {
-        switch (failureCtx.type()) {
-            case SYSTEM_WORKER_CRASH:
-                return FailureAction.STOP;
-
-            case CRITICAL_ERROR:
-                return FailureAction.STOP;
-
-            default:
-                assert false : "Unsupported Ignite failure type: " + failureCtx.type();
-
-                return FailureAction.STOP;
-        }
+    @Override public FailureAction onFailure(FailureContext failureCtx, GridKernalContext ctx) {
+        return null; // FIXME
     }
 }

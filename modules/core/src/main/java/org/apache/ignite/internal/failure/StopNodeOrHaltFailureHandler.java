@@ -23,23 +23,30 @@ import org.apache.ignite.failure.FailureHandler;
 import org.apache.ignite.internal.GridKernalContext;
 
 /**
- * Default implementation of {@link FailureHandler}
+ * This implementation will try to stop node if tryStop value is true.
+ * If node can't be stopped during provided timeout or tryStop value is false
+ * then JVM process will be terminated forcibly ( Runtime.halt() ).
  */
-public class DefaultFailureHandler implements FailureHandler {
+public class StopNodeOrHaltFailureHandler implements FailureHandler {
+    /** Try stop. */
+    private final boolean tryStop;
+
+    /** Timeout. */
+    private final long timeout;
+
+    /**
+     * @param tryStop Try stop.
+     * @param timeout Timeout.
+     */
+    public StopNodeOrHaltFailureHandler(boolean tryStop, long timeout) {
+        this.tryStop = tryStop;
+        this.timeout = timeout;
+    }
+
     /** {@inheritDoc} */
-    @Override public FailureAction onFailure(FailureContext failureCtx,
-        GridKernalContext ctx) {
-        switch (failureCtx.type()) {
-            case SYSTEM_WORKER_CRASH:
-                return FailureAction.STOP;
+    @Override public FailureAction onFailure(FailureContext failureCtx, GridKernalContext ctx) {
+        // TODO Runtime.getRuntime().halt(Ignition.KILL_EXIT_CODE);
 
-            case CRITICAL_ERROR:
-                return FailureAction.STOP;
-
-            default:
-                assert false : "Unsupported Ignite failure type: " + failureCtx.type();
-
-                return FailureAction.STOP;
-        }
+        return null; // FIXME
     }
 }
