@@ -2256,9 +2256,10 @@ public class GridCachePartitionExchangeManager<K, V> extends GridCacheSharedMana
                 err = e;
             }
             finally {
-                if (!stop)
+                if (!stop) {
                     cctx.kernalContext().failure().process(
                         new FailureContext(FailureType.SYSTEM_WORKER_TERMINATION, err));
+                }
             }
         }
 

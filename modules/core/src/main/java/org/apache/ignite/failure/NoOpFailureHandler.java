@@ -18,6 +18,7 @@
 package org.apache.ignite.failure;
 
 import org.apache.ignite.Ignite;
+import org.apache.ignite.internal.util.typedef.internal.U;
 
 /**
  * Just ignores any failure. It's useful for tests and debugging.
@@ -25,6 +26,8 @@ import org.apache.ignite.Ignite;
 public class NoOpFailureHandler implements FailureHandler {
     /** {@inheritDoc} */
     @Override public boolean onFailure(Ignite ignite, FailureContext failureCtx) {
+        U.error(ignite.log(), "Critical failure occured on ignite instance [name=" + ignite.name() + "]: " + failureCtx);
+
         return false;
     }
 }

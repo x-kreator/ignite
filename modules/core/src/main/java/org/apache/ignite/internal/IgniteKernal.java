@@ -906,7 +906,6 @@ public class IgniteKernal implements IgniteEx, IgniteMXBean, Externalizable {
             startProcessor(new IgnitePluginProcessor(ctx, cfg, plugins));
 
             startProcessor(new FailureProcessor(ctx));
-            rsrcProc.injectGeneric(ctx.failure());
 
             startProcessor(new PoolProcessor(ctx));
 

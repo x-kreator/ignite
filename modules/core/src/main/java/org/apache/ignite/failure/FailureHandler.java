@@ -19,6 +19,7 @@ package org.apache.ignite.failure;
 
 import org.apache.ignite.Ignite;
 import org.apache.ignite.configuration.IgniteConfiguration;
+import org.apache.ignite.internal.processors.failure.FailureProcessor;
 
 /**
  * Provides facility to handle failures by custom user implementations,
@@ -26,6 +27,10 @@ import org.apache.ignite.configuration.IgniteConfiguration;
  */
 public interface FailureHandler {
     /**
+     * Handles failure occured on {@code ignite} instance.
+     * Failure information is contained in {@code failureCtx}.
+     * Returns {@code true} if kernal context must be invalidated by {@link FailureProcessor} after calling this method.
+     *
      * @param ignite Ignite instance.
      * @param failureCtx Failure context.
      * @return Whether kernal context must be invalidated or not.

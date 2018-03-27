@@ -19,12 +19,13 @@ package org.apache.ignite.failure;
 
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.Ignition;
 import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
 /**
  * Specific implementation that could be used only with ignite.(sh|bat).
- * Process will be terminated using Ignition.restart(true) call.
+ * Process will be terminated using {@link Ignition#restart(boolean)} call.
  */
 public class RestartProcessFailureHandler implements FailureHandler {
     /** {@inheritDoc} */
@@ -32,9 +33,7 @@ public class RestartProcessFailureHandler implements FailureHandler {
         new Thread(
             new Runnable() {
                 @Override public void run() {
-                    final IgniteLogger log = ignite.log();
-
-                    U.warn(log, "Restarting JVM on Ignite failure: " + failureCtx);
+                    U.error(ignite.log(), "Restarting JVM on Ignite failure: " + failureCtx);
 
                     G.restart(true);
                 }

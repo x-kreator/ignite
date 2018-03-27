@@ -21,10 +21,10 @@ package org.apache.ignite.failure;
  * Types of failures.
  */
 public enum FailureType {
-    /** Segmentation. */
+    /** Node segmentation. */
     SEGMENTATION,
 
-    /** System worker crash. */
+    /** System worker termination. */
     SYSTEM_WORKER_TERMINATION,
 
     /** Critical error. */

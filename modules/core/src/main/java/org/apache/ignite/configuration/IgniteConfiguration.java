@@ -2924,23 +2924,20 @@ public class IgniteConfiguration {
     }
 
     /**
-     * Gets custom failure handler.
+     * Gets failure handler.
      */
     public FailureHandler getFailureHandler() {
         return failureHnd;
     }
 
     /**
-     * Sets custom failure handler.
+     * Sets failure handler.
      *
      * @param failureHnd Failure handler.
-     * @return {@code this} for chaining.
+     * @return {@code This} for chaining.
      */
     public IgniteConfiguration setFailureHandler(FailureHandler failureHnd) {
         this.failureHnd = failureHnd;
-
-        if (failureHnd instanceof LifecycleBean)
-            ;//lifecycleBeans.
 
         return this;
     }

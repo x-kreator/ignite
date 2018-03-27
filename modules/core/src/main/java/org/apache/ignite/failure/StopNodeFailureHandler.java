@@ -31,9 +31,7 @@ public class StopNodeFailureHandler implements FailureHandler {
         new Thread(
             new Runnable() {
                 @Override public void run() {
-                    final IgniteLogger log = ignite.log();
-
-                    U.warn(log, "Stopping local node on Ignite failure: " + failureCtx);
+                    U.error(ignite.log(), "Stopping local node on Ignite failure: " + failureCtx);
 
                     IgnitionEx.stop(ignite.name(), true, true);
                 }

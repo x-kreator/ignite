@@ -453,13 +453,17 @@ public class StandaloneGridKernalContext implements GridKernalContext {
         return null;
     }
 
+    /** {@inheritDoc} */
     @Override public void invalidate(FailureContext ctx) {
+        // No-op
     }
 
+    /** {@inheritDoc} */
     @Override public FailureContext invalidationCause() {
         return null;
     }
 
+    /** {@inheritDoc} */
     @Override public FailureProcessor failure() {
         return null;
     }

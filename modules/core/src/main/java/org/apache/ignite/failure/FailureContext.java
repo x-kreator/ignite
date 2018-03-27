@@ -17,8 +17,12 @@
 
 package org.apache.ignite.failure;
 
+import org.apache.ignite.internal.util.typedef.internal.A;
+import org.apache.ignite.internal.util.typedef.internal.S;
+
 /**
- * Failure context class, which instances handled by configured FailureHandler instance when Ignite failure occurs.
+ * Failure context contains information about failure such as failure type and exception if applicable.
+ * This information could be used for appropriate handling of the failure.
  */
 public class FailureContext {
     /** Type. */
@@ -32,7 +36,7 @@ public class FailureContext {
      * @param error Cause.
      */
     public FailureContext(FailureType type, Throwable error) {
-        assert type != null;
+        A.notNull(type, "Failure type can't be null");
 
         this.type = type;
         this.error = error;
@@ -46,7 +50,7 @@ public class FailureContext {
     }
 
     /**
-     * @return error or {@code null}.
+     * @return Error or {@code null}.
      */
     public Throwable error() {
         return error;
@@ -54,9 +58,6 @@ public class FailureContext {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return "FailureContext [" +
-            "type=" + type +
-            ", error=" + error +
-            ']';
+        return S.toString(FailureContext.class, this);
     }
 }

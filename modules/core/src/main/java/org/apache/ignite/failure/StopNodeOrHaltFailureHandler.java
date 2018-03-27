@@ -58,9 +58,9 @@ public class StopNodeOrHaltFailureHandler implements FailureHandler {
             new Thread(
                 new Runnable() {
                     @Override public void run() {
-                        U.warn(log, "Stopping local node on Ignite failure: " + failureCtx);
+                        U.error(log, "Stopping local node on Ignite failure: " + failureCtx);
 
-                        IgnitionEx.stop(ignite.name(), true, true, 60 * 1000);
+                        IgnitionEx.stop(ignite.name(), true, true);
 
                         latch.countDown();
                     }
@@ -87,7 +87,7 @@ public class StopNodeOrHaltFailureHandler implements FailureHandler {
             ).start();
         }
         else {
-            U.warn(log, "JVM will be halted immediately.");
+            U.error(log, "JVM will be halted immediately on ignite failure: " + failureCtx);
 
             Runtime.getRuntime().halt(Ignition.KILL_EXIT_CODE);
         }
