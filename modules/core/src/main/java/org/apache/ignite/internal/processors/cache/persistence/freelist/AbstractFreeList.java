@@ -495,6 +495,9 @@ public abstract class AbstractFreeList<T extends Storable> extends PagesList imp
 
                 pageId = PageIdUtils.pageId(row.partition(), PageIdAllocator.FLAG_DATA, PageIdUtils.pageIndex(reusedPageId));
 
+                if (pageId == 0x1000000000011L)
+                    System.out.println("reusedPageId: " + reusedPageId);
+
                 long reusedPage = acquirePage(reusedPageId);
                 try {
                     long reusedPageAddr = writeLock(reusedPageId, reusedPage);
@@ -532,7 +535,7 @@ public abstract class AbstractFreeList<T extends Storable> extends PagesList imp
 
             written = write(pageId, writeRow, initIo, row, written, FAIL_I);
 
-            assert written != FAIL_I; // We can't fail here.
+            assert written != FAIL_I : "pageId=" + U.hexLong(pageId); // We can't fail here.
         }
         while (written != COMPLETE);
     }

@@ -27,6 +27,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.DataStorageConfiguration;
+import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.store.PageStore;
 import org.apache.ignite.internal.processors.cache.persistence.AllocatedPageTracker;
@@ -337,6 +338,13 @@ public class FilePageStore implements PageStore {
             assert pageBuf.capacity() == pageSize;
             assert pageBuf.position() == 0;
             assert pageBuf.order() == ByteOrder.nativeOrder();
+
+            if (PageIdUtils.partId(pageId) == PageIdAllocator.INDEX_PARTITION)
+                System.out.println("Dangerous pageId: " + U.hexLong(pageId) + ", thread: " + Thread.currentThread().getName());
+
+            if (off > (allocated.get() - headerSize()))
+                System.out.println("Bad pageId: " + U.hexLong(pageId) + ", thread: " + Thread.currentThread().getName());
+
             assert off <= (allocated.get() - headerSize()) : "calculatedOffset=" + off +
                 ", allocated=" + allocated.get() + ", headerSize="+headerSize();
 
