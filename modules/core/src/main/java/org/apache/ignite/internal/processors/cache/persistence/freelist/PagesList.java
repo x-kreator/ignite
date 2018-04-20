@@ -1115,10 +1115,7 @@ public abstract class PagesList extends DataStructure {
 
                             initIo.initNewPage(tailAddr, dataPageId, pageSize());
 
-                            int itemId = PageIdUtils.itemId(tailId);
-
-                            if (itemId != 0)
-                                PageIO.setRotatedIdPart(tailAddr, itemId);
+                            PageIO.setRotatedIdPart(tailAddr, (int)(tailId >>> PageIdUtils.PAGE_IDX_SIZE));
 
                             if (needWalDeltaRecord(tailId, tailPage, null)) {
                                 wal.log(new InitNewPageRecord(grpId, tailId, initIo.getType(),

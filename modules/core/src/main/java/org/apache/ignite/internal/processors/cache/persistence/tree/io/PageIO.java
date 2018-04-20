@@ -308,7 +308,7 @@ public abstract class PageIO {
      * @return Rotated page ID part.
      */
     public static int getRotatedIdPart(long pageAddr) {
-        return PageUtils.getUnsignedByte(pageAddr, ROTATED_ID_PART_OFF);
+        return PageUtils.getInt(pageAddr, ROTATED_ID_PART_OFF);
     }
 
     /**
@@ -316,7 +316,7 @@ public abstract class PageIO {
      * @param rotatedIdPart Rotated page ID part.
      */
     public static void setRotatedIdPart(long pageAddr, int rotatedIdPart) {
-        PageUtils.putUnsignedByte(pageAddr, ROTATED_ID_PART_OFF, rotatedIdPart);
+        PageUtils.putInt(pageAddr, ROTATED_ID_PART_OFF, rotatedIdPart);
 
         assert getRotatedIdPart(pageAddr) == rotatedIdPart;
     }

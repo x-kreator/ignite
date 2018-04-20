@@ -164,6 +164,14 @@ public final class PageIdUtils {
     }
 
     /**
+     * @param rotatedIdPart Rotated id part.
+     * @param pageIdx Page index.
+     */
+    public static long pageId(int rotatedIdPart, int pageIdx) {
+        return ((long)rotatedIdPart << PAGE_IDX_SIZE) | (pageIdx & PAGE_IDX_MASK);
+    }
+
+    /**
      * @param pageId Page ID.
      * @return Flag.
      */

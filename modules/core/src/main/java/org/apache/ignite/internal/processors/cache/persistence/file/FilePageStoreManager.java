@@ -581,6 +581,9 @@ public class FilePageStoreManager extends GridCacheSharedManagerAdapter implemen
         try {
             long pageIdx = store.allocatePage();
 
+            System.out.println("@@@ allocated page [grpId=" + grpId + ", partId=" + partId + ", pageIdx=" + pageIdx +
+                "], thread=" + Thread.currentThread().getName());
+
             return PageIdUtils.pageId(partId, flags, (int)pageIdx);
         }
         catch (PersistentStorageIOException e) {

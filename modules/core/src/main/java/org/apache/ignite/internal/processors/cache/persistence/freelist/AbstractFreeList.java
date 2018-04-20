@@ -504,10 +504,7 @@ public abstract class AbstractFreeList<T extends Storable> extends PagesList imp
                     try {
                         initIo.initNewPage(reusedPageAddr, pageId, pageSize());
 
-                        int itemId = PageIdUtils.itemId(reusedPageId);
-
-                        if (itemId != 0)
-                            PageIO.setRotatedIdPart(reusedPageAddr, itemId);
+                        PageIO.setRotatedIdPart(reusedPageAddr, (int)(reusedPageId >>> PageIdUtils.PAGE_IDX_SIZE));
 
                         if (needWalDeltaRecord(reusedPageId, reusedPage, null)) {
                             wal.log(new InitNewPageRecord(grpId, reusedPageId, initIo.getType(),

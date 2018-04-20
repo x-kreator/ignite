@@ -377,11 +377,18 @@ public abstract class DataStructure implements PageLockListener {
         long page,
         long pageAddr,
         Boolean walPlc) throws IgniteCheckedException {
-        long recycled = PageIdUtils.link(
+        int rotatedIdPart = PageIO.getRotatedIdPart(pageAddr);
+
+        if (rotatedIdPart == 0)
+            return pageId;
+
+        long recycled = /*PageIdUtils.link(
             PageIdUtils.pageId(INDEX_PARTITION, FLAG_IDX, PageIdUtils.pageIndex(pageId)),
-            PageIO.getRotatedIdPart(pageAddr));
+            PageIO.getRotatedIdPart(pageAddr));*/
+            PageIdUtils.pageId(rotatedIdPart, PageIdUtils.pageIndex(pageId));
 
         PageIO.setPageId(pageAddr, recycled);
+        PageIO.setRotatedIdPart(pageAddr, 0);
 
         if (needWalDeltaRecord(pageId, page, walPlc))
             wal.log(new RecycleRecord(grpId, pageId, recycled));

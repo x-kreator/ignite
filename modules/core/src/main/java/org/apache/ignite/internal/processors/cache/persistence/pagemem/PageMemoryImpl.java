@@ -677,6 +677,9 @@ public class PageMemoryImpl implements PageMemoryEx {
             long absPtr;
 
             if (relPtr == INVALID_REL_PTR) {
+                System.out.println("@@@ page is missing in memory [grpId=" + grpId + ", partId=" + PageIdUtils.partId(pageId) +
+                ", pageIdx=" + PageIdUtils.pageIndex(pageId) + "], thread=" + Thread.currentThread().getName());
+
                 relPtr = seg.borrowOrAllocateFreePage(pageId);
 
                 if (relPtr == INVALID_REL_PTR)
