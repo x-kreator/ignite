@@ -32,12 +32,14 @@ public class IgnitePdsNativeIoTestSuite2 extends TestSuite {
     public static TestSuite suite() throws Exception {
         TestSuite suite = new TestSuite("Ignite Persistent Store Test Suite 2 (Native IO)");
 
+/*
         IgnitePdsTestSuite2.addRealPageStoreTests(suite);
 
         //Integrity test with reduced count of pages.
         suite.addTestSuite(IgniteNativeIoPdsRecoveryAfterFileCorruptionTest.class);
 
         suite.addTestSuite(IgniteNativeIoLocalWalModeChangeDuringRebalancingSelfTest.class);
+*/
 
         suite.addTestSuite(IgniteNativeIoWalFlushFsyncSelfTest.class);
 
