@@ -19,6 +19,7 @@ package org.apache.ignite.internal.processors.cache.distributed.near;
 
 import java.io.Externalizable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -28,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import javax.cache.Cache;
 import javax.cache.CacheException;
@@ -3145,6 +3147,11 @@ public class GridNearTxLocal extends GridDhtTxLocalAdapter implements GridTimeou
         }
     }
 
+    /** */
+    private static volatile long lastLFTime;
+    /** */
+    private AtomicInteger nearLFCallCnt = new AtomicInteger();
+
     /** {@inheritDoc} */
     @SuppressWarnings({"CatchGenericClass", "ThrowableInstanceNeverThrown"})
     @Override public boolean localFinish(boolean commit, boolean clearThreadMap) throws IgniteCheckedException {
@@ -3198,6 +3205,21 @@ public class GridNearTxLocal extends GridDhtTxLocalAdapter implements GridTimeou
                 systemInvalidate(true);
 
                 U.warn(log, "Set transaction invalidation flag to true due to error [tx=" + this + ", err=" + err + ']');
+
+                for (StackTraceElement ste : Thread.currentThread().getStackTrace())
+                    System.err.println("  " + ste);
+
+                long currTime = System.currentTimeMillis();
+
+                if (currTime - lastLFTime > 100)
+                    nearLFCallCnt.set(0);
+                else if (nearLFCallCnt.incrementAndGet() > 10) {
+                    U.sleep(1000);
+
+                    Runtime.getRuntime().halt(666);
+                }
+
+                lastLFTime = currTime;
             }
         }
 
