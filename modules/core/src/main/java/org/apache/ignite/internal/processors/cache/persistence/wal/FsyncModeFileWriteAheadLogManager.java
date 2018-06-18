@@ -2081,17 +2081,17 @@ public class FsyncModeFileWriteAheadLogManager extends GridCacheSharedManagerAda
      *
      * @param io I/O interface for file.
      * @param idx Segment index.
-     * @param version Serializer version.
+     * @param ver Serializer version.
      * @return I/O position after write version.
      * @throws IOException If failed to write serializer version.
      */
-    public static long writeSerializerVersion(FileIO io, long idx, int version, WALMode mode) throws IOException {
-        ByteBuffer buffer = prepareSerializerVersionBuffer(idx, version, false);
+    private static long writeSerializerVersion(FileIO io, long idx, int ver, WALMode mode) throws IOException {
+        ByteBuffer buf = prepareSerializerVersionBuffer(idx, ver, false);
 
         do {
-            io.write(buffer);
+            io.write(buf);
         }
-        while (buffer.hasRemaining());
+        while (buf.hasRemaining());
 
         // Flush
         if (mode == WALMode.FSYNC)
