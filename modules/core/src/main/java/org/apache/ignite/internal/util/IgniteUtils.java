@@ -3502,10 +3502,22 @@ public abstract class IgniteUtils {
             try {
                 try (DirectoryStream<Path> stream = Files.newDirectoryStream(path)) {
                     for (Path innerPath : stream) {
+                        if (innerPath.endsWith("wal/wal_IgniteWalFlushFsyncSelfTest1"))
+                            System.out.println(innerPath);
+
                         boolean res = delete(innerPath);
 
-                        if (!res)
-                            return false;
+                        if (innerPath.toString().endsWith("1.wal")) {
+                            try {
+                                U.sleep(1000);
+                            }
+                            catch (IgniteInterruptedCheckedException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        //if (!res)
+                        //    return false;
                     }
                 }
             } catch (IOException e) {

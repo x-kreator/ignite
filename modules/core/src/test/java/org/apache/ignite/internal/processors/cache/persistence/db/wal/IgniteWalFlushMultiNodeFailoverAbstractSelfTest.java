@@ -180,6 +180,7 @@ public abstract class IgniteWalFlushMultiNodeFailoverAbstractSelfTest extends Gr
                 }
                 catch (Exception expected) {
                     // Expected exception.
+                    log.warning("i: " + i + ", ITRS / 4: " + (i > ITRS / 4) + ", ITRS / 2: " + (i > ITRS / 2), expected);
                 }
             }
 
