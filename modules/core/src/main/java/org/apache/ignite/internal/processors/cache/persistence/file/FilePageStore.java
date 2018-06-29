@@ -31,6 +31,7 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.DataStorageConfiguration;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
+import org.apache.ignite.internal.pagemem.PageMemory;
 import org.apache.ignite.internal.pagemem.store.PageStore;
 import org.apache.ignite.internal.processors.cache.persistence.AllocatedPageTracker;
 import org.apache.ignite.internal.processors.cache.persistence.tree.io.PageIO;
@@ -581,6 +582,9 @@ public class FilePageStore implements PageStore {
                         + " should be same with " + ByteOrder.nativeOrder();
                     assert PageIO.getType(pageBuf) != 0 : "Invalid state. Type is 0! pageId = " + U.hexLong(pageId);
                     assert PageIO.getVersion(pageBuf) != 0 : "Invalid state. Version is 0! pageId = " + U.hexLong(pageId);
+
+                    if (type == PageMemory.FLAG_IDX)
+                        System.out.println("@@@ [" + System.identityHashCode(this) + "] pageId: " + U.hexLong(pageId) + ", type: " + PageIO.getType(pageBuf)); // FIXME debug
 
                     if (calculateCrc && !skipCrc) {
                         assert PageIO.getCrc(pageBuf) == 0 : U.hexLong(pageId);
