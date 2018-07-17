@@ -69,6 +69,7 @@ public class IgniteCacheQuerySelfTestSuite2 extends TestSuite {
         suite.addTestSuite(DynamicIndexReplicatedAtomicConcurrentSelfTest.class);
         suite.addTestSuite(DynamicIndexReplicatedTransactionalConcurrentSelfTest.class);
 
+/*
         suite.addTestSuite(DynamicColumnsConcurrentAtomicPartitionedSelfTest.class);
         suite.addTestSuite(DynamicColumnsConcurrentTransactionalPartitionedSelfTest.class);
         suite.addTestSuite(DynamicColumnsConcurrentAtomicReplicatedSelfTest.class);
@@ -106,6 +107,7 @@ public class IgniteCacheQuerySelfTestSuite2 extends TestSuite {
         suite.addTestSuite(IgniteCacheGroupsSqlDistributedJoinSelfTest.class);
 
         suite.addTestSuite(QueryJoinWithDifferentNodeFiltersTest.class);
+*/
 
         return suite;
     }

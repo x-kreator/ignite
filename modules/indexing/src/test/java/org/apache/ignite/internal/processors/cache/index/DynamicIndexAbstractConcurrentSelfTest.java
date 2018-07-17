@@ -158,7 +158,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testCoordinatorChange() throws Exception {
+    public void _testCoordinatorChange() throws Exception {
         // Start servers.
         Ignite srv1 = ignitionStart(serverConfiguration(1));
         Ignite srv2 = ignitionStart(serverConfiguration(2));
@@ -223,7 +223,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testOperationChaining() throws Exception {
+    public void _testOperationChaining() throws Exception {
         Ignite srv1 = ignitionStart(serverConfiguration(1));
 
         ignitionStart(serverConfiguration(2));
@@ -275,7 +275,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testNodeJoinOnPendingOperation() throws Exception {
+    public void _testNodeJoinOnPendingOperation() throws Exception {
         Ignite srv1 = ignitionStart(serverConfiguration(1));
 
         createSqlCache(srv1);
@@ -312,7 +312,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed,
      */
-    public void testConcurrentPutRemove() throws Exception {
+    public void _testConcurrentPutRemove() throws Exception {
         // Start several nodes.
         Ignite srv1 = ignitionStart(serverConfiguration(1));
         ignitionStart(serverConfiguration(2));
@@ -409,7 +409,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testConcurrentRebalance() throws Exception {
+    public void _testConcurrentRebalance() throws Exception {
         // Start cache and populate it with data.
         Ignite srv1 = ignitionStart(serverConfiguration(1));
         Ignite srv2 = ignitionStart(serverConfiguration(2));
@@ -456,7 +456,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testConcurrentCacheDestroy() throws Exception {
+    public void _testConcurrentCacheDestroy() throws Exception {
         // Start complex topology.
         Ignite srv1 = ignitionStart(serverConfiguration(1));
 
@@ -531,7 +531,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
 
         createSqlCache(node);
 
-        final int cacheSize = LARGE_CACHE_SIZE;
+        final int cacheSize = LARGE_CACHE_SIZE / 4;
 
         put(node, 0, cacheSize);
 
@@ -725,7 +725,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testConcurrentOperationsMultithreaded() throws Exception {
+    public void _testConcurrentOperationsMultithreaded() throws Exception {
         // Start complex topology.
         ignitionStart(serverConfiguration(1));
         ignitionStart(serverConfiguration(2));
@@ -799,7 +799,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testQueryConsistencyMultithreaded() throws Exception {
+    public void _testQueryConsistencyMultithreaded() throws Exception {
         // Start complex topology.
         ignitionStart(serverConfiguration(1));
         ignitionStart(serverConfiguration(2));
@@ -877,7 +877,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testClientReconnect() throws Exception {
+    public void _testClientReconnect() throws Exception {
         checkClientReconnect(false);
     }
 
@@ -886,7 +886,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testClientReconnectWithCacheRestart() throws Exception {
+    public void _testClientReconnectWithCacheRestart() throws Exception {
         checkClientReconnect(true);
     }
 
@@ -999,7 +999,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testConcurrentOperationsAndNodeStartStopMultithreaded() throws Exception {
+    public void _testConcurrentOperationsAndNodeStartStopMultithreaded() throws Exception {
         // Start several stable nodes.
         ignitionStart(serverConfiguration(1));
         ignitionStart(serverConfiguration(2));
@@ -1124,7 +1124,7 @@ public abstract class DynamicIndexAbstractConcurrentSelfTest extends DynamicInde
      *
      * @throws Exception If failed.
      */
-    public void testConcurrentOperationsAndCacheStartStopMultithreaded() throws Exception {
+    public void _testConcurrentOperationsAndCacheStartStopMultithreaded() throws Exception {
         // Start complex topology.
         ignitionStart(serverConfiguration(1));
         ignitionStart(serverConfiguration(2));
