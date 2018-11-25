@@ -112,7 +112,7 @@ public class IndexStoragePageMemoryImplTest extends IndexStorageSelfTest {
             () -> true,
             new DataRegionMetricsImpl(new DataRegionConfiguration()),
             PageMemoryImpl.ThrottlingPolicy.DISABLED,
-            Mockito.mock(CheckpointWriteProgressSupplier.class)
-        );
+            Mockito.mock(CheckpointWriteProgressSupplier.class),
+            null);
     }
 }
