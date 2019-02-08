@@ -284,8 +284,8 @@ public class PageMemoryImpl implements PageMemoryEx {
     /** Prewarming. */
     @Nullable private final PageMemoryPrewarming prewarming;
 
-    /** Loaded pages tracker. */
-    @Nullable private final LoadedPagesTracker loadedPagesTracker;
+    /** Loaded pages trackers. */
+    @Nullable private final LoadedPagesTracker loadedPagesTrackers;
 
     /**
      * Marker that stop was invoked and memory is not supposed for any usage.
@@ -316,7 +316,8 @@ public class PageMemoryImpl implements PageMemoryEx {
         DataRegionMetricsImpl memMetrics,
         @Nullable ThrottlingPolicy throttlingPlc,
         @NotNull CheckpointWriteProgressSupplier cpProgressProvider,
-        @Nullable PageMemoryPrewarming prewarming) {
+        @Nullable PageMemoryPrewarming prewarming,
+        @Nullable LoadedPagesTracker loadedPagesTracker) {
         assert ctx != null;
         assert pageSize > 0;
 
@@ -336,7 +337,7 @@ public class PageMemoryImpl implements PageMemoryEx {
         this.cpProgressProvider = cpProgressProvider;
 
         this.prewarming = prewarming;
-        this.loadedPagesTracker = prewarming instanceof LoadedPagesTracker ? (LoadedPagesTracker)prewarming : null;
+        this.loadedPagesTrackers = prewarming instanceof LoadedPagesTracker ? (LoadedPagesTracker)prewarming : null;
 
         storeMgr = ctx.pageStore();
         walMgr = ctx.wal();
@@ -416,7 +417,7 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /** {@inheritDoc} */
-    @Override public void startWarmingUp() {
+    @Override public void startPrewarming() {
         if (prewarming != null)
             prewarming.start();
     }
@@ -620,8 +621,8 @@ public class PageMemoryImpl implements PageMemoryEx {
 
             seg.loadedPages.put(grpId, PageIdUtils.effectivePageId(pageId), relPtr, seg.partGeneration(grpId, partId));
 
-            if (loadedPagesTracker != null)
-                loadedPagesTracker.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
+            if (loadedPagesTrackers != null)
+                loadedPagesTrackers.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
         }
         catch (IgniteOutOfMemoryException oom) {
             DataRegionConfiguration dataRegionCfg = getDataRegionConfiguration();
@@ -799,8 +800,8 @@ public class PageMemoryImpl implements PageMemoryEx {
                     seg.partGeneration(grpId, partId)
                 );
 
-                if (loadedPagesTracker != null)
-                    loadedPagesTracker.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
+                if (loadedPagesTrackers != null)
+                    loadedPagesTrackers.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
 
                 long pageAddr = absPtr + PAGE_OVERHEAD;
 
@@ -946,8 +947,8 @@ public class PageMemoryImpl implements PageMemoryEx {
         if (rmv) {
             seg.loadedPages.remove(grpId, PageIdUtils.effectivePageId(pageId));
 
-            if (loadedPagesTracker != null)
-                loadedPagesTracker.onPageUnload(grpId, PageIdUtils.effectivePageId(pageId));
+            if (loadedPagesTrackers != null)
+                loadedPagesTrackers.onPageUnload(grpId, PageIdUtils.effectivePageId(pageId));
         }
 
         Collection<FullPageId> cpPages = seg.segCheckpointPages;
@@ -1397,7 +1398,7 @@ public class PageMemoryImpl implements PageMemoryEx {
         CountDownFuture completeFut = new CountDownFuture(segments.length);
 
         for (Segment seg : segments) {
-            Runnable clear = new ClearSegmentRunnable(seg, pred, cleanDirty, completeFut, pageSize(), loadedPagesTracker);
+            Runnable clear = new ClearSegmentRunnable(seg, pred, cleanDirty, completeFut, pageSize(), loadedPagesTrackers);
 
             try {
                 asyncRunner.execute(clear);
@@ -2412,8 +2413,8 @@ public class PageMemoryImpl implements PageMemoryEx {
                     fullPageId.effectivePageId()
                 );
 
-                if (loadedPagesTracker != null)
-                    loadedPagesTracker.onPageUnload(fullPageId.groupId(), fullPageId.effectivePageId());
+                if (loadedPagesTrackers != null)
+                    loadedPagesTrackers.onPageUnload(fullPageId.groupId(), fullPageId.effectivePageId());
 
                 return relRmvAddr;
             }
@@ -2488,8 +2489,8 @@ public class PageMemoryImpl implements PageMemoryEx {
                         fullPageId.effectivePageId()
                     );
 
-                    if (loadedPagesTracker != null)
-                        loadedPagesTracker.onPageEvicted(fullPageId.groupId(), fullPageId.effectivePageId());
+                    if (loadedPagesTrackers != null)
+                        loadedPagesTrackers.onPageEvicted(fullPageId.groupId(), fullPageId.effectivePageId());
 
                     return addr;
                 }
@@ -2950,15 +2951,15 @@ public class PageMemoryImpl implements PageMemoryEx {
     /**
      *
      */
-    private static class ForEachSegmentRunnable implements Runnable {
+    private static class ForEachSegmentRunnable implements Runnable, BiConsumer<FullPageId, Long> {
         /** */
-        private Segment seg;
+        private final Segment seg;
 
         /** */
-        private BiConsumer<FullPageId, Long> act;
+        private final BiConsumer<FullPageId, Long> act;
 
         /** */
-        private CountDownFuture doneFut;
+        private final CountDownFuture doneFut;
 
         /**
          * @param seg Seg.
@@ -2974,13 +2975,18 @@ public class PageMemoryImpl implements PageMemoryEx {
         /** {@inheritDoc} */
         @Override public void run() {
             try {
-                seg.loadedPages.forEach(act);
+                seg.loadedPages.forEach(this);
 
                 doneFut.onDone();
             }
             catch (Throwable e) {
                 doneFut.onDone(e);
             }
+        }
+
+        /** {@inheritDoc} */
+        @Override public void accept(FullPageId fullPageId, Long val) {
+            act.accept(fullPageId, PageHeader.readTimestamp(seg.absolute(val)));
         }
     }
 

@@ -2013,7 +2013,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             PageMemory pageMem = dataRegion.pageMemory();
 
             if (pageMem instanceof PageMemoryEx)
-                ((PageMemoryEx)pageMem).startWarmingUp();
+                ((PageMemoryEx)pageMem).startPrewarming();
         }
     }
 

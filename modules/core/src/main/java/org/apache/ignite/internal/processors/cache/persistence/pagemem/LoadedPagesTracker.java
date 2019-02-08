@@ -37,4 +37,30 @@ public interface LoadedPagesTracker {
      * @param pageId Page id.
      */
     public void onPageEvicted(int grpId, long pageId);
+
+    /**
+     * @param other Other.
+     */
+    public default LoadedPagesTracker compose(LoadedPagesTracker other) {
+        assert other != null;
+
+        LoadedPagesTracker self = this;
+
+        return new LoadedPagesTracker() {
+            @Override public void onPageLoad(int grpId, long pageId) {
+                self.onPageLoad(grpId, pageId);
+                other.onPageLoad(grpId, pageId);
+            }
+
+            @Override public void onPageUnload(int grpId, long pageId) {
+                self.onPageUnload(grpId, pageId);
+                other.onPageUnload(grpId, pageId);
+            }
+
+            @Override public void onPageEvicted(int grpId, long pageId) {
+                self.onPageEvicted(grpId, pageId);
+                self.onPageEvicted(grpId, pageId);
+            }
+        };
+    }
 }

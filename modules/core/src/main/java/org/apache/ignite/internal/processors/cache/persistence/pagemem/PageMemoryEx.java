@@ -166,9 +166,9 @@ public interface PageMemoryEx extends PageMemory {
     public IgniteInternalFuture<Void> forEachAsync(BiConsumer<FullPageId, Long> act);
 
     /**
-     * Starts page memory warming-up process.
+     * Starts page memory prewarming process.
      */
-    public void startWarmingUp();
+    public void startPrewarming();
 
     /**
      *  Specifies count of segments.

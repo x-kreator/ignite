@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
@@ -34,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import org.apache.ignite.DataRegionMetrics;
 import org.apache.ignite.IgniteCheckedException;
@@ -49,12 +52,15 @@ import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
 import org.apache.ignite.internal.util.future.CountDownFuture;
+import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.SB;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
 import org.apache.ignite.thread.IgniteThread;
 import org.apache.ignite.thread.IgniteThreadFactory;
 
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_MASK;
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_SIZE;
 import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_SIZE;
 import static org.apache.ignite.internal.stat.IoStatisticsType.CACHE_GROUP;
 
@@ -79,6 +85,9 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
     /** Prewarming configuration. */
     private final PrewarmingConfiguration prewarmCfg;
+
+    /** Prewarming page ids supplier. */
+    private final Supplier<Map<Integer, Map<Integer, Supplier<int[]>>>> pageIdsSupplier;
 
     /** Data region metrics. */
     private final DataRegionMetrics dataRegMetrics;
@@ -137,12 +146,14 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
     /**
      * @param dataRegName Data region name.
      * @param prewarmCfg Prewarming configuration.
+     * @param pageIdsSupplier Prewarming page IDs supplier.
      * @param dataRegMetrics Data region metrics.
      * @param ctx Cache shared context.
      */
     public PageMemoryPrewarmingImpl(
         String dataRegName,
         PrewarmingConfiguration prewarmCfg,
+        PrewarmingPageIdsSupplier pageIdsSupplier,
         DataRegionMetrics dataRegMetrics,
         GridCacheSharedContext<?, ?> ctx) {
 
@@ -157,6 +168,20 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
         this.ctx = ctx;
         this.log = ctx.logger(PageMemoryPrewarmingImpl.class);
+
+        Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier = prewarmCfg.getCustomPageIdsSupplier();
+
+        assert customPageIdsSupplier != null ^ pageIdsSupplier != null;
+
+        this.pageIdsSupplier = customPageIdsSupplier == null ? pageIdsSupplier :
+            () -> {
+                Map<Integer, Map<Integer, Supplier<int[]>>> map = new HashMap<>();
+
+                for (Map.Entry<String, Map<Integer, Supplier<int[]>>> entry : customPageIdsSupplier.get().entrySet())
+                    map.put(CU.cacheId(entry.getKey()), entry.getValue());
+
+                return map;
+            };
 
         int dumpReadThread = prewarmCfg.getDumpReadThreads();
 
@@ -518,7 +543,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
             long startTs = U.currentTimeMillis();
 
-            pageMem.forEachAsync((fullId, val) -> {
+            pageMem.forEachAsync((fullId, touchTs) -> {
                 if (prewarmCfg.isIndexesOnly() &&
                     PageIdUtils.partId(fullId.pageId()) != PageIdAllocator.INDEX_PARTITION)
                     return;
@@ -531,7 +556,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
                         key -> getSegment(key).resetModifiedAndGet());
 
                 if (seg != null)
-                    seg.addPageIdx(fullId.pageId());
+                    seg.addPageIdx(fullId.pageId(), touchTs);
             }).get();
 
             int segUpdated = 0;
@@ -595,18 +620,31 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
      * @param seg Segment.
      */
     private void updateSegment(Segment seg) throws IOException {
-        int[] pageIdxArr = seg.pageIdxArr;
+        long[] pageIdxTsArr = seg.pageIdxTsArr;
 
-        seg.pageIdxArr = null;
+        seg.pageIdxTsArr = null;
 
         File segFile = new File(dumpDir, seg.fileName());
 
-        if (pageIdxArr.length == 0) {
+        if (pageIdxTsArr.length == 0) {
             if (!segFile.delete())
                 U.warn(log, "Failed to delete prewarming dump file: " + segFile.getName());
 
             return;
         }
+
+        int heatTimeQuantum = prewarmCfg.getHeatTimeQuantum();
+
+        int curTime = (int)(U.currentTimeMillis() / 1000 / heatTimeQuantum);
+
+        for (int i = 0; i < pageIdxTsArr.length; i++) {
+            long pageIdxTs = pageIdxTsArr[i];
+
+            pageIdxTsArr[i] = (pageIdxTs & PAGE_IDX_MASK) |
+                ((curTime - (pageIdxTs >> PAGE_IDX_SIZE) / heatTimeQuantum) << PAGE_IDX_SIZE);
+        }
+
+        Arrays.sort(pageIdxTsArr);
 
         try (FileIO io = new RandomAccessFileIO(segFile,
             StandardOpenOption.WRITE,
@@ -617,7 +655,9 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
             int chunkPtr = 0;
 
-            for (int pageIdx : pageIdxArr) {
+            for (long pageIdxTs : pageIdxTsArr) {
+                int pageIdx = (int)(pageIdxTs & PAGE_IDX_MASK);
+
                 chunkPtr = U.intToBytes(pageIdx, chunk, chunkPtr);
 
                 if (chunkPtr == chunk.length) {
@@ -674,8 +714,8 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
         /** Modified flag. */
         volatile boolean modified;
 
-        /** Page index array. */
-        volatile int[] pageIdxArr;
+        /** Page index and timestamp array. */
+        volatile long[] pageIdxTsArr;
 
         /** Page index array pointer. */
         volatile int pageIdxI;
@@ -723,17 +763,18 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
         /**
          * @param pageId Page id.
+         * @param touchTs Touch timestamp.
          */
-        void addPageIdx(long pageId) {
+        void addPageIdx(long pageId, long touchTs) {
             int ptr = pageIdxIUpd.getAndIncrement(this);
 
-            if (ptr < pageIdxArr.length)
-                pageIdxArr[ptr] = PageIdUtils.pageIndex(pageId);
+            if (ptr < pageIdxTsArr.length)
+                pageIdxTsArr[ptr] = ((touchTs / 1000) << PAGE_IDX_SIZE) | PageIdUtils.pageIndex(pageId);
         }
 
         /**
          * Returns {@code null} if {@link #modified} is {@code false}, otherwise resets {@link #pageIdxI},
-         * creates new {@link #pageIdxArr} and returns {@code this}.
+         * creates new {@link #pageIdxTsArr} and returns {@code this}.
          */
         Segment resetModifiedAndGet() {
             if (!modified)
@@ -743,7 +784,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
             pageIdxI = 0;
 
-            pageIdxArr = new int[idCnt];
+            pageIdxTsArr = new long[idCnt];
 
             return this;
         }
@@ -826,7 +867,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
                 int[] pageIdxArr = loadPageIndexes(segFile);
 
-                Arrays.sort(pageIdxArr);
+                // Arrays.sort(pageIdxArr); // TODO no need after sorting at dump phase!
 
                 CountDownFuture completeFut = new CountDownFuture(pageIdxArr.length);
 
