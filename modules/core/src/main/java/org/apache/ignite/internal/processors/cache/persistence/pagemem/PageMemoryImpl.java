@@ -2905,15 +2905,15 @@ public class PageMemoryImpl implements PageMemoryEx {
     /**
      *
      */
-    private static class ForEachSegmentRunnable implements Runnable {
+    private static class ForEachSegmentRunnable implements Runnable, BiConsumer<FullPageId, Long> {
         /** */
-        private Segment seg;
+        private final Segment seg;
 
         /** */
-        private BiConsumer<FullPageId, Long> act;
+        private final BiConsumer<FullPageId, Long> act;
 
         /** */
-        private CountDownFuture doneFut;
+        private final CountDownFuture doneFut;
 
         /**
          * @param seg Seg.
@@ -2929,13 +2929,18 @@ public class PageMemoryImpl implements PageMemoryEx {
         /** {@inheritDoc} */
         @Override public void run() {
             try {
-                seg.loadedPages.forEach(act);
+                seg.loadedPages.forEach(this);
 
                 doneFut.onDone();
             }
             catch (Throwable e) {
                 doneFut.onDone(e);
             }
+        }
+
+        /** {@inheritDoc} */
+        @Override public void accept(FullPageId fullPageId, Long val) {
+            act.accept(fullPageId, PageHeader.readTimestamp(seg.absolute(val)));
         }
     }
 

@@ -44,14 +44,19 @@ import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
 import org.apache.ignite.thread.IgniteThread;
 
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_MASK;
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_SIZE;
 import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_SIZE;
 
 /**
  * Default {@link PageMemoryWarmingUp} implementation.
  */
 public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPagesTracker {
-    /** Warm up directory name. */
+    /** Warm-up directory name. */
     private static final String WARM_UP_DIR = "warm";
+
+    /** Warm-up quantum in seconds. Must be greater or equal 1. */
+    private static final int WARM_UP_QUANTUM = 10;
 
     /** Data region configuration. */
     private final DataRegionConfiguration dataRegCfg;
@@ -71,13 +76,13 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
     /** Page memory. */
     private volatile PageMemoryEx pageMem;
 
-    /** Warm up directory. */
+    /** Warm-up directory. */
     private File warmUpDir;
 
-    /** Warm up thread. */
+    /** Warm-up thread. */
     private volatile Thread warmUpThread;
 
-    /** Stop warming up flag. */
+    /** Stop warming-up flag. */
     private volatile boolean stopWarmingUp;
 
     /** Dump worker. */
@@ -248,7 +253,7 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
 
                     int[] pageIdxArr = loadPageIndexes(segFile);
 
-                    Arrays.sort(pageIdxArr);
+                    // Arrays.sort(pageIdxArr); // TODO no need after sorting at dump phase!
 
                     del = false;
 
@@ -322,7 +327,7 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
 
             long startTs = U.currentTimeMillis();
 
-            pageMem.forEachAsync((fullId, val) -> {
+            pageMem.forEachAsync((fullId, ts) -> {
                 if (dataRegCfg.isWarmingUpIndexesOnly() &&
                     PageIdUtils.partId(fullId.pageId()) != PageIdAllocator.INDEX_PARTITION)
                     return;
@@ -335,7 +340,7 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
                         key -> getSegment(key).resetModifiedAndGet());
 
                 if (seg != null)
-                    seg.addPageIdx(fullId.pageId());
+                    seg.addPageIdx(fullId.pageId(), ts);
             }).get();
 
             int segUpdated = 0;
@@ -400,18 +405,31 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
      * @param seg Segment.
      */
     private void updateSegment(Segment seg) throws IOException {
-        int[] pageIdxArr = seg.pageIdxArr;
+        long[] pageIdxTsArr = seg.pageIdxTsArr;
 
-        seg.pageIdxArr = null;
+        seg.pageIdxTsArr = null;
 
         File segFile = new File(warmUpDir, seg.fileName());
 
-        if (pageIdxArr.length == 0) {
+        if (pageIdxTsArr.length == 0) {
             if (!segFile.delete())
                 U.warn(log, "Failed to delete warming-up file: " + segFile.getName());
 
             return;
         }
+
+        int warmUpQuantum = warmUpQuantum();
+
+        int curTime = (int)(U.currentTimeMillis() / 1000 / warmUpQuantum);
+
+        for (int i = 0; i < pageIdxTsArr.length; i++) {
+            long pageIdxTs = pageIdxTsArr[i];
+
+            pageIdxTsArr[i] = (pageIdxTs & PAGE_IDX_MASK) |
+                ((curTime - (pageIdxTs >> PAGE_IDX_SIZE) / warmUpQuantum) << PAGE_IDX_SIZE);
+        }
+
+        Arrays.sort(pageIdxTsArr);
 
         try (FileIO io = new RandomAccessFileIO(segFile,
             StandardOpenOption.WRITE,
@@ -422,7 +440,9 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
 
             int chunkPtr = 0;
 
-            for (int pageIdx : pageIdxArr) {
+            for (long pageIdxTs : pageIdxTsArr) {
+                int pageIdx = (int)(pageIdxTs & PAGE_IDX_MASK);
+
                 chunkPtr = U.intToBytes(pageIdx, chunk, chunkPtr);
 
                 if (chunkPtr == chunk.length) {
@@ -438,6 +458,13 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
                 io.force();
             }
         }
+    }
+
+    /**
+     *
+     */
+    private int warmUpQuantum() {
+        return WARM_UP_QUANTUM;
     }
 
     /**
@@ -479,8 +506,8 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
         /** Modified flag. */
         volatile boolean modified;
 
-        /** Page index array. */
-        volatile int[] pageIdxArr;
+        /** Page index and timestamp array. */
+        volatile long[] pageIdxTsArr;
 
         /** Page index array pointer. */
         volatile int pageIdxI;
@@ -529,16 +556,16 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
         /**
          * @param pageId Page id.
          */
-        void addPageIdx(long pageId) {
+        void addPageIdx(long pageId, long ts) {
             int ptr = pageIdxIUpd.getAndIncrement(this);
 
-            if (ptr < pageIdxArr.length)
-                pageIdxArr[ptr] = PageIdUtils.pageIndex(pageId);
+            if (ptr < pageIdxTsArr.length)
+                pageIdxTsArr[ptr] = ((ts / 1000) << PAGE_IDX_SIZE) | PageIdUtils.pageIndex(pageId);
         }
 
         /**
          * Returns {@code null} if {@link #modified} is {@code false}, otherwise resets {@link #pageIdxI},
-         * creates new {@link #pageIdxArr} and returns {@code this}.
+         * creates new {@link #pageIdxTsArr} and returns {@code this}.
          */
         Segment resetModifiedAndGet() {
             if (!modified)
@@ -548,7 +575,7 @@ public class PageMemoryWarmingUpImpl implements PageMemoryWarmingUp, LoadedPages
 
             pageIdxI = 0;
 
-            pageIdxArr = new int[idCnt];
+            pageIdxTsArr = new long[idCnt];
 
             return this;
         }
