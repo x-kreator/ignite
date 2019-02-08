@@ -137,6 +137,7 @@ import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemor
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryImpl;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryPrewarming;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryPrewarmingImpl;
+import org.apache.ignite.internal.processors.cache.persistence.pagemem.LastLoadedPagesIdsStore;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.GroupPartitionId;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.PartitionAllocationMap;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.PartitionRecoverState;
@@ -1094,8 +1095,16 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         PrewarmingConfiguration prewarmCfg = plcCfg.getPrewarmingConfiguration();
 
-        if (prewarmCfg != null)
-            prewarming = new PageMemoryPrewarmingImpl(plcCfg.getName(), prewarmCfg, memMetrics, cctx);
+        if (prewarmCfg != null) {
+            prewarming = new PageMemoryPrewarmingImpl(
+                plcCfg.getName(),
+                prewarmCfg,
+                prewarmCfg.getCustomPageIdsSupplier() == null ?
+                    new LastLoadedPagesIdsStore(plcCfg.getName(), prewarmCfg, cctx) :
+                    null,
+                memMetrics,
+                cctx);
+        }
 
         PageMemoryImpl pageMem = new PageMemoryImpl(
             wrapMetricsMemoryProvider(memProvider, memMetrics),
@@ -2013,7 +2022,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             PageMemory pageMem = dataRegion.pageMemory();
 
             if (pageMem instanceof PageMemoryEx)
-                ((PageMemoryEx)pageMem).startWarmingUp();
+                ((PageMemoryEx)pageMem).startPrewarming();
         }
     }
 
