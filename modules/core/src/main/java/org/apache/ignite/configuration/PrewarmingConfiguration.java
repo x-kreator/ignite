@@ -17,6 +17,8 @@
 package org.apache.ignite.configuration;
 
 import java.io.Serializable;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * This class defines page memory prewarming configuration.
@@ -27,6 +29,12 @@ public class PrewarmingConfiguration implements Serializable {
 
     /** Runtime dump disabled. */
     public static final long RUNTIME_DUMP_DISABLED = -1;
+
+    /** Dump all page IDs. */
+    public static final double DUMP_ALL = 1.0;
+
+    /** Default heat time quantum. */
+    public static final int DFLT_HEAT_TIME_QUANTUM = 10;
 
     /**
      * Optimal count of threads for warm up pages loading into memory.
@@ -43,6 +51,9 @@ public class PrewarmingConfiguration implements Serializable {
     /** Default throttle accuracy. */
     public static final double DFLT_THROTTLE_ACCURACY = 0.25;
 
+    /** Supplier of partition page indexes which assumed as supplier of all pages in the partition. */
+    public static final Supplier<int[]> WHOLE_PARTITION = () -> null;
+
     /** Prewarming of indexes only flag. */
     private boolean indexesOnly;
 
@@ -51,6 +62,12 @@ public class PrewarmingConfiguration implements Serializable {
 
     /** Prewarming runtime dump delay. */
     private long runtimeDumpDelay = RUNTIME_DUMP_DISABLED;
+
+    /** Dump percentage. */
+    private double dumpPercentage = DUMP_ALL;
+
+    /** Heat time quantum. */
+    private int heatTimeQuantum = DFLT_HEAT_TIME_QUANTUM;
 
     /** Count of threads which are used for warm up dump files reading. */
     private int dumpReadThreads = Math.min(
@@ -62,6 +79,9 @@ public class PrewarmingConfiguration implements Serializable {
 
     /** Prewarming throttle accuracy. */
     private double throttleAccuracy = DFLT_THROTTLE_ACCURACY;
+
+    /** Custom supplier of page IDs to prewarm. */
+    private Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier;
 
     /**
      * If enabled, only index partitions will be tracked and warmed up.
@@ -129,6 +149,44 @@ public class PrewarmingConfiguration implements Serializable {
     }
 
     /**
+     * @return Dump percentage.
+     */
+    public double getDumpPercentage() {
+        return dumpPercentage;
+    }
+
+    /**
+     * @param dumpPercentage New dump percentage.
+     * @return {@code this} for chaining.
+     */
+    public PrewarmingConfiguration setDumpPercentage(double dumpPercentage) {
+        this.dumpPercentage = dumpPercentage;
+
+        return this;
+    }
+
+    /**
+     * Gets heat time quantum in seconds.
+     *
+     * @return Heat time quantum.
+     */
+    public int getHeatTimeQuantum() {
+        return heatTimeQuantum;
+    }
+
+    /**
+     * Sets heat time quantum in seconds. Must be greater or equal than 1.
+     *
+     * @param heatTimeQuantum New heat time quantum.
+     * @return {@code this} for chaining.
+     */
+    public PrewarmingConfiguration setHeatTimeQuantum(int heatTimeQuantum) {
+        this.heatTimeQuantum = heatTimeQuantum;
+
+        return this;
+    }
+
+    /**
      * Specifies count of threads which are used for warm up dump files reading.
      *
      * @return Count of thread which are used for warm up dump files reading.
@@ -190,5 +248,28 @@ public class PrewarmingConfiguration implements Serializable {
         this.throttleAccuracy = throttleAccuracy;
 
         return this;
+    }
+
+    /**
+     * Gets custom supplier of page IDs to prewarm.
+     * It should supply a map, which keys will assumed as cache names, and values as maps of partition IDs in that cache
+     * to suppliers of page indexes arrays in that partition. Pages will be loaded in order which provided by supplier.
+     *
+     * @see #setCustomPageIdsSupplier(Supplier)
+     * @return Custom supplier of page IDs to prewarm.
+     */
+    public Supplier<Map<String, Map<Integer, Supplier<int[]>>>> getCustomPageIdsSupplier() {
+        return customPageIdsSupplier;
+    }
+
+    /**
+     * Sets custom supplier of page IDs to prewarm.
+     * If not set, default supplier which provides IDs of loaded pages before last shutdown will be used.
+     *
+     * @see #getCustomPageIdsSupplier()
+     * @param customPageIdsSupplier New custom supplier of page IDs to prewarm.
+     */
+    public void setCustomPageIdsSupplier(Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier) {
+        this.customPageIdsSupplier = customPageIdsSupplier;
     }
 }

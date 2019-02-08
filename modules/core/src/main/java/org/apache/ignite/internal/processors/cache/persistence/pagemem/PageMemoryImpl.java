@@ -78,6 +78,7 @@ import org.apache.ignite.internal.processors.query.GridQueryRowCacheCleaner;
 import org.apache.ignite.internal.stat.IoStatisticsHolder;
 import org.apache.ignite.internal.stat.IoStatisticsHolderNoOp;
 import org.apache.ignite.internal.util.GridConcurrentHashSet;
+import org.apache.ignite.internal.util.GridConcurrentLinkedHashSet;
 import org.apache.ignite.internal.util.GridLongList;
 import org.apache.ignite.internal.util.GridMultiCollectionWrapper;
 import org.apache.ignite.internal.util.GridUnsafe;
@@ -284,8 +285,8 @@ public class PageMemoryImpl implements PageMemoryEx {
     /** Prewarming. */
     @Nullable private final PageMemoryPrewarming prewarming;
 
-    /** Loaded pages tracker. */
-    @Nullable private final LoadedPagesTracker loadedPagesTracker;
+    /** Loaded pages trackers. */
+    @Nullable private final Collection<LoadedPagesTracker> loadedPagesTrackers = new GridConcurrentLinkedHashSet<>();
 
     /**
      * Marker that stop was invoked and memory is not supposed for any usage.
@@ -336,7 +337,9 @@ public class PageMemoryImpl implements PageMemoryEx {
         this.cpProgressProvider = cpProgressProvider;
 
         this.prewarming = prewarming;
-        this.loadedPagesTracker = prewarming instanceof LoadedPagesTracker ? (LoadedPagesTracker)prewarming : null;
+
+        if (prewarming instanceof LoadedPagesTracker)
+            loadedPagesTrackers.add((LoadedPagesTracker)prewarming);
 
         storeMgr = ctx.pageStore();
         walMgr = ctx.wal();
@@ -416,7 +419,7 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /** {@inheritDoc} */
-    @Override public void startWarmingUp() {
+    @Override public void startPrewarming() {
         if (prewarming != null)
             prewarming.start();
     }
@@ -620,8 +623,7 @@ public class PageMemoryImpl implements PageMemoryEx {
 
             seg.loadedPages.put(grpId, PageIdUtils.effectivePageId(pageId), relPtr, seg.partGeneration(grpId, partId));
 
-            if (loadedPagesTracker != null)
-                loadedPagesTracker.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
+            trackPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
         }
         catch (IgniteOutOfMemoryException oom) {
             DataRegionConfiguration dataRegionCfg = getDataRegionConfiguration();
@@ -799,8 +801,7 @@ public class PageMemoryImpl implements PageMemoryEx {
                     seg.partGeneration(grpId, partId)
                 );
 
-                if (loadedPagesTracker != null)
-                    loadedPagesTracker.onPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
+                trackPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
 
                 long pageAddr = absPtr + PAGE_OVERHEAD;
 
@@ -946,8 +947,7 @@ public class PageMemoryImpl implements PageMemoryEx {
         if (rmv) {
             seg.loadedPages.remove(grpId, PageIdUtils.effectivePageId(pageId));
 
-            if (loadedPagesTracker != null)
-                loadedPagesTracker.onPageUnload(grpId, PageIdUtils.effectivePageId(pageId));
+            trackPageUnload(grpId, PageIdUtils.effectivePageId(pageId));
         }
 
         Collection<FullPageId> cpPages = seg.segCheckpointPages;
@@ -1397,7 +1397,7 @@ public class PageMemoryImpl implements PageMemoryEx {
         CountDownFuture completeFut = new CountDownFuture(segments.length);
 
         for (Segment seg : segments) {
-            Runnable clear = new ClearSegmentRunnable(seg, pred, cleanDirty, completeFut, pageSize(), loadedPagesTracker);
+            Runnable clear = new ClearSegmentRunnable(seg, pred, cleanDirty, completeFut, pageSize());
 
             try {
                 asyncRunner.execute(clear);
@@ -2009,6 +2009,47 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /**
+     * @param tracker Loaded pages tracker.
+     */
+    public void addLoadedPagesTracker(LoadedPagesTracker tracker) {
+        loadedPagesTrackers.add(tracker);
+    }
+
+    /**
+     * @param tracker Loaded pages tracker.
+     */
+    public void removeLoadedPagesTracker(LoadedPagesTracker tracker) {
+        loadedPagesTrackers.remove(tracker);
+    }
+
+    /**
+     * @param grpId Group id.
+     * @param pageId Page id.
+     */
+    private void trackPageLoad(int grpId, long pageId) {
+        for (LoadedPagesTracker tracker : loadedPagesTrackers)
+            tracker.onPageLoad(grpId, pageId);
+    }
+
+    /**
+     * @param grpId Group id.
+     * @param pageId Page id.
+     */
+    private void trackPageUnload(int grpId, long pageId) {
+        for (LoadedPagesTracker tracker : loadedPagesTrackers)
+            tracker.onPageUnload(grpId, pageId);
+    }
+
+    /**
+     * @param grpId Group id.
+     * @param pageId Page id.
+     */
+    private void trackPageEvicted(int grpId, long pageId) {
+        for (LoadedPagesTracker tracker : loadedPagesTrackers)
+            tracker.onPageEvicted(grpId, pageId);
+    }
+
+    /**
      *
      */
     private class Segment extends ReentrantReadWriteLock {
@@ -2412,8 +2453,7 @@ public class PageMemoryImpl implements PageMemoryEx {
                     fullPageId.effectivePageId()
                 );
 
-                if (loadedPagesTracker != null)
-                    loadedPagesTracker.onPageUnload(fullPageId.groupId(), fullPageId.effectivePageId());
+                trackPageUnload(fullPageId.groupId(), fullPageId.effectivePageId());
 
                 return relRmvAddr;
             }
@@ -2488,8 +2528,7 @@ public class PageMemoryImpl implements PageMemoryEx {
                         fullPageId.effectivePageId()
                     );
 
-                    if (loadedPagesTracker != null)
-                        loadedPagesTracker.onPageEvicted(fullPageId.groupId(), fullPageId.effectivePageId());
+                    trackPageEvicted(fullPageId.groupId(), fullPageId.effectivePageId());
 
                     return addr;
                 }
@@ -2854,7 +2893,7 @@ public class PageMemoryImpl implements PageMemoryEx {
     /**
      *
      */
-    private static class ClearSegmentRunnable implements Runnable {
+    private class ClearSegmentRunnable implements Runnable {
         /** */
         private Segment seg;
 
@@ -2883,15 +2922,13 @@ public class PageMemoryImpl implements PageMemoryEx {
             LoadedPagesMap.KeyPredicate clearPred,
             boolean rmvDirty,
             CountDownFuture doneFut,
-            int pageSize,
-            LoadedPagesTracker loadedPagesTracker
+            int pageSize
         ) {
             this.seg = seg;
             this.clearPred = clearPred;
             this.rmvDirty = rmvDirty;
             this.doneFut = doneFut;
             this.pageSize = pageSize;
-            this.loadedPagesTracker = loadedPagesTracker;
         }
 
         /** {@inheritDoc} */
@@ -2950,15 +2987,15 @@ public class PageMemoryImpl implements PageMemoryEx {
     /**
      *
      */
-    private static class ForEachSegmentRunnable implements Runnable {
+    private static class ForEachSegmentRunnable implements Runnable, BiConsumer<FullPageId, Long> {
         /** */
-        private Segment seg;
+        private final Segment seg;
 
         /** */
-        private BiConsumer<FullPageId, Long> act;
+        private final BiConsumer<FullPageId, Long> act;
 
         /** */
-        private CountDownFuture doneFut;
+        private final CountDownFuture doneFut;
 
         /**
          * @param seg Seg.
@@ -2974,13 +3011,18 @@ public class PageMemoryImpl implements PageMemoryEx {
         /** {@inheritDoc} */
         @Override public void run() {
             try {
-                seg.loadedPages.forEach(act);
+                seg.loadedPages.forEach(this);
 
                 doneFut.onDone();
             }
             catch (Throwable e) {
                 doneFut.onDone(e);
             }
+        }
+
+        /** {@inheritDoc} */
+        @Override public void accept(FullPageId fullPageId, Long val) {
+            act.accept(fullPageId, PageHeader.readTimestamp(seg.absolute(val)));
         }
     }
 

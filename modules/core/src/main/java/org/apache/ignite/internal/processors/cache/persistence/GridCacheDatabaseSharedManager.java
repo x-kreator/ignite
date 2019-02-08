@@ -133,10 +133,12 @@ import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStor
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListener;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.CheckpointMetricsTracker;
+import org.apache.ignite.internal.processors.cache.persistence.pagemem.LoadedPagesTracker;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryEx;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryImpl;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryPrewarming;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryPrewarmingImpl;
+import org.apache.ignite.internal.processors.cache.persistence.pagemem.PrewarmingPageIdsSupplier;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.GroupPartitionId;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.PartitionAllocationMap;
 import org.apache.ignite.internal.processors.cache.persistence.partstate.PartitionRecoverState;
@@ -1092,10 +1094,20 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         PageMemoryPrewarming prewarming = null;
 
+        PrewarmingPageIdsSupplier pageIdsSupplier = null;
+
         PrewarmingConfiguration prewarmCfg = plcCfg.getPrewarmingConfiguration();
 
-        if (prewarmCfg != null)
-            prewarming = new PageMemoryPrewarmingImpl(plcCfg.getName(), prewarmCfg, memMetrics, cctx);
+        if (prewarmCfg != null) {
+            prewarming = new PageMemoryPrewarmingImpl(
+                plcCfg.getName(),
+                prewarmCfg,
+                prewarmCfg.getCustomPageIdsSupplier() == null ?
+                    pageIdsSupplier = new PrewarmingPageIdsSupplier(plcCfg.getName(), prewarmCfg, cctx) :
+                    null,
+                memMetrics,
+                cctx);
+        }
 
         PageMemoryImpl pageMem = new PageMemoryImpl(
             wrapMetricsMemoryProvider(memProvider, memMetrics),
@@ -1129,8 +1141,14 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         memMetrics.pageMemory(pageMem);
 
-        if (prewarming != null)
+        if (prewarming != null) {
             prewarming.pageMemory(pageMem);
+
+            if (pageIdsSupplier != null)
+                pageMem.addLoadedPagesTracker(pageIdsSupplier);
+            else if (prewarmCfg.getCustomPageIdsSupplier() instanceof LoadedPagesTracker)
+                pageMem.addLoadedPagesTracker((LoadedPagesTracker)prewarmCfg.getCustomPageIdsSupplier());
+        }
 
         return pageMem;
     }
@@ -2013,7 +2031,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             PageMemory pageMem = dataRegion.pageMemory();
 
             if (pageMem instanceof PageMemoryEx)
-                ((PageMemoryEx)pageMem).startWarmingUp();
+                ((PageMemoryEx)pageMem).startPrewarming();
         }
     }
 
