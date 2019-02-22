@@ -28,6 +28,9 @@ public class PrewarmingConfiguration implements Serializable {
     /** Runtime dump disabled. */
     public static final long RUNTIME_DUMP_DISABLED = -1;
 
+    /** Dump all page IDs. */
+    public static final double DUMP_ALL = 1.0;
+
     /** Prewarming of indexes only flag. */
     private boolean indexesOnly;
 
@@ -36,6 +39,9 @@ public class PrewarmingConfiguration implements Serializable {
 
     /** Prewarming runtime dump delay. */
     private long runtimeDumpDelay = RUNTIME_DUMP_DISABLED;
+
+    /** Dump percentage. */
+    private double dumpPercentage = DUMP_ALL;
 
     /**
      * If enabled, only index partitions will be tracked and warmed up.
@@ -98,6 +104,23 @@ public class PrewarmingConfiguration implements Serializable {
      */
     public PrewarmingConfiguration setRuntimeDumpDelay(long runtimeDumpDelay) {
         this.runtimeDumpDelay = runtimeDumpDelay;
+
+        return this;
+    }
+
+    /**
+     * @return Dump percentage.
+     */
+    public double dumpPercentage() {
+        return dumpPercentage;
+    }
+
+    /**
+     * @param dumpPercentage New dump percentage.
+     * @return {@code this} for chaining.
+     */
+    public PrewarmingConfiguration dumpPercentage(double dumpPercentage) {
+        this.dumpPercentage = dumpPercentage;
 
         return this;
     }
