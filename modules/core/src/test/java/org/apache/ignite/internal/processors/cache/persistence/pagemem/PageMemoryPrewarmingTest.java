@@ -35,9 +35,6 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.configuration.PrewarmingConfiguration;
 import org.apache.ignite.configuration.WALMode;
 import org.apache.ignite.internal.IgniteEx;
-import org.apache.ignite.internal.IgniteKernal;
-import org.apache.ignite.internal.processors.cache.GridCacheEntryEx;
-import org.apache.ignite.internal.processors.cache.GridCacheEntryRemovedException;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -64,7 +61,7 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
     protected int tmpFileMBytes = 2 * 1024;
 
     /** Size of int[] array values, x4 in bytes. */
-    protected int valSize = 5 * 1024 * 1024;
+    protected int valSize = 1024 * 1024;
 
     /** Value count. */
     protected int valCnt = 20;
@@ -92,7 +89,8 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
                 .setPersistenceEnabled(true)
                 .setPrewarmingConfiguration(new PrewarmingConfiguration()
                     .setWaitPrewarmingOnStart(waitPrewarmingOnStart)
-                    .setRuntimeDumpDelay(prewarmingRuntimeDumpDelay))
+                    .setRuntimeDumpDelay(prewarmingRuntimeDumpDelay)
+                    .setPageLoadThreads(1))
             );
 
         cfg.setDataStorageConfiguration(memCfg);
@@ -275,7 +273,7 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
         ListeningTestLogger log = new ListeningTestLogger(false, log());
 
         LogListener throttleLsnr = throttleListener(true);
-        LogListener stopLsnr = LogListener.matches("Warming-up of DataRegion [name=default] finished in ")
+        LogListener stopLsnr = LogListener.matches("Prewarming of DataRegion [name=default] finished in ")
             .times(1).build();
 
         log.registerListener(throttleLsnr);
@@ -284,8 +282,7 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
         IgniteConfiguration cfg = getConfiguration(getTestIgniteInstanceName(0)).setGridLogger(log);
 
         cfg.getDataStorageConfiguration().getDefaultDataRegionConfiguration().getPrewarmingConfiguration()
-            .setThrottleAccuracy(0.9)
-            .setDumpReadThreads(1);
+            .setThrottleAccuracy(0.9);
 
         GridTestUtils.runMultiThreadedAsync(getLoadRunnable(stop), 10, "put-thread");
 
@@ -297,9 +294,14 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
                     stopLsnr.reset();
                     throttleLsnr.reset();
 
-                    ignite = startGrid(cfg);
+                    ignite = startGrid(new IgniteConfiguration(cfg));
 
-                    res = GridTestUtils.waitForCondition(stopLsnr::check, 180_000) && throttleLsnr.check();
+                    res = GridTestUtils.waitForCondition(stopLsnr::check, 120_000) && throttleLsnr.check();
+
+                    if (res)
+                        break;
+
+                    stopGrid(0, true);
                 }
                 catch (Throwable t) {
                     Thread.interrupted();
@@ -310,8 +312,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
         }
         finally {
             stop.set(true);
-
-            ignite.close();
         }
     }
 
@@ -388,15 +388,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
                                 cache0.put(k, val);
                             else
                                 cache0.remove(k);
-
-                            IgniteKernal primaryNode = (IgniteKernal)primaryCache(k, CACHE_NAME).unwrap(Ignite.class);
-                            GridCacheEntryEx entry = primaryNode.internalCache(CACHE_NAME).entryEx(k);
-
-                            try {
-                                entry.unswap();
-                            }
-                            catch (IgniteCheckedException | GridCacheEntryRemovedException ignore) {
-                            }
                         }
                     }
                     catch (Throwable ignore) {}
