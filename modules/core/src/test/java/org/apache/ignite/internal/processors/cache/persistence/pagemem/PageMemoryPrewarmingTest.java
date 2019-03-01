@@ -129,6 +129,8 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
      * @throws Exception If failed.
      */
     public long doCachePersistenceRead(boolean prewarmingEnabled, boolean prewarmingMultithreaded, IgniteLogger log) throws Exception {
+        assertTrue(valCnt > 0);
+
         fillPersistence();
 
         IgniteConfiguration cfg = getConfiguration(getTestIgniteInstanceName(0)).setGridLogger(log);
