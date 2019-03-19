@@ -17,6 +17,8 @@
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.apache.ignite.DataRegionMetrics;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
@@ -37,6 +41,7 @@ import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
 import org.apache.ignite.internal.util.future.CountDownFuture;
+import org.apache.ignite.internal.util.typedef.T3;
 import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lifecycle.LifecycleAware;
@@ -241,9 +246,19 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
         boolean useCustomPageIds = customPageIdsSupplier != null;
 
-        Map<?, Map<Integer, Supplier<int[]>>> pageIdsMap = useCustomPageIds ?
-            customPageIdsSupplier.get() :
+        List<List<T3<Integer, Integer, Supplier<int[]>>>> pageIdSegments = useCustomPageIds ?
+            Collections.singletonList(customPageIdsSupplier.get().entrySet().stream()
+                .flatMap(entry -> entry.getValue().entrySet().stream()
+                    .map(entry1 -> new T3<>(
+                        CU.cacheId(entry.getKey()),
+                        entry1.getKey(),
+                        entry1.getValue())))
+                .collect(Collectors.toList())) :
             pageIdsSupplier.get();
+
+        /*Map<?, Map<Integer, Supplier<int[]>>> pageIdsMap = useCustomPageIds ?
+            customPageIdsSupplier.get() :
+            pageIdsSupplier.get();*/
 
         initReadsRate();
 
@@ -252,12 +267,12 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
         if (needThrottling.get() && log.isInfoEnabled())
             log.info("Detected need to throttle warming up.");
 
-        int segCnt = 0;
+        int partCnt = 0;
 
         for (Map<?, ?> map : pageIdsMap.values())
-            segCnt += map.size();
+            partCnt += map.size();
 
-        if (segCnt == 0) {
+        if (partCnt == 0) {
             U.warn(log,"Prewarming of DataRegion [name=" + dataRegName + "] skipped because no page IDs supplied.");
 
             return;
@@ -280,7 +295,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
             segmentLdr.setWorkers(workers);
         }
 
-        CountDownFuture completeFut = new CountDownFuture(segCnt);
+        CountDownFuture completeFut = new CountDownFuture(partCnt);
 
         AtomicInteger pagesWarmed = new AtomicInteger();
 

@@ -17,19 +17,19 @@
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
@@ -42,7 +42,7 @@ import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
-import org.apache.ignite.internal.util.typedef.internal.SB;
+import org.apache.ignite.internal.util.typedef.T3;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
 import org.apache.ignite.lifecycle.LifecycleAware;
@@ -56,7 +56,7 @@ import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_SIZE;
  *
  */
 public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTracker,
-    Supplier<Map<Integer, Map<Integer, Supplier<int[]>>>> {
+    Supplier<List<List<T3<Integer, Integer, Supplier<int[]>>>>> {
     /** Prewarming page IDs dump directory name. */
     private static final String PREWARM_DUMP_DIR = "prewarm";
 
@@ -132,21 +132,22 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     @Override public void stop() throws IgniteException {
         stopping = true;
 
-        try {
-            if (dumpWorker != null) {
-                if (!loadedPagesDumpInProgress)
-                    dumpWorker.cancel();
+        LoadedPagesIdsDumpWorker dumpWorker = this.dumpWorker;
 
+        if (dumpWorker != null) {
+            dumpWorker.wakeUp();
+
+            try {
                 dumpWorker.join();
             }
-        }
-        catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
 
-            throw new IgniteException(e);
+                throw new IgniteException(e);
+            }
         }
-
-        dumpLoadedPagesIds(true);
+        else
+            dumpLoadedPagesIds(true);
     }
 
     /** {@inheritDoc} */
@@ -173,22 +174,12 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     }
 
     /** {@inheritDoc} */
-    @Override public Map<Integer, Map<Integer, Supplier<int[]>>> get() {
-        File[] segFiles = dumpDir.listFiles(Segment.FILE_FILTER);
-
-        if (segFiles == null) {
-            if (log.isInfoEnabled())
-                log.info("Saved prewarming dump files not found!");
-
-            return Collections.emptyMap();
-        }
-
-        if (log.isInfoEnabled())
-            log.info("Saved prewarming dump files found: " + segFiles.length);
-
+    @Override public List<List<T3<Integer, Integer, Supplier<int[]>>>> get() {
         Map<Integer, Map<Integer, Supplier<int[]>>> pageIdsMap = new HashMap<>();
 
-        for (File segFile : segFiles) {
+        List<List<T3<Integer, Integer, Supplier<int[]>>>> pageIdSegments = new ArrayList<>();
+
+        for (File segFile : segFiles) { // TODO fix the body!!!
             try {
                 int partId = Integer.parseInt(segFile.getName().substring(
                     Segment.GRP_ID_PREFIX_LENGTH,
@@ -221,7 +212,7 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
             }
         }
 
-        return pageIdsMap;
+        return pageIdSegments;
     }
 
     /**
@@ -393,23 +384,9 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
      *
      */
     private static class Segment {
-        /** File extension. */
-        private static final String FILE_EXT = ".seg";
-
-        /** File name length. */
-        private static final int FILE_NAME_LENGTH = 12;
-
-        /** Group ID prefix length. */
-        private static final int GRP_ID_PREFIX_LENGTH = 8;
 
         /** Group ID key mask. */
         private static final long GRP_ID_MASK = ~(-1L << 32);
-
-        /** File name pattern. */
-        private static final Pattern FILE_NAME_PATTERN = Pattern.compile("[0-9A-Fa-f]{" + FILE_NAME_LENGTH + "}\\" + FILE_EXT);
-
-        /** File filter. */
-        private static final FileFilter FILE_FILTER = file -> !file.isDirectory() && FILE_NAME_PATTERN.matcher(file.getName()).matches();
 
         /** Id count field updater. */
         private static final AtomicIntegerFieldUpdater<Segment> idCntUpd = AtomicIntegerFieldUpdater.newUpdater(
@@ -441,20 +418,6 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
          */
         Segment(long key) {
             this.key = key;
-        }
-
-        /**
-         *
-         */
-        String fileName() {
-            SB b = new SB();
-
-            String keyHex = Long.toHexString(key);
-
-            for (int i = keyHex.length(); i < FILE_NAME_LENGTH; i++)
-                b.a('0');
-
-            return b.a(keyHex).a(FILE_EXT).toString();
         }
 
         /**
@@ -519,6 +482,9 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
         /** */
         private static final String NAME_SUFFIX = "-loaded-pages-ids-dump-worker";
 
+        /** */
+        private final Object monitor = new Object();
+
         /**
          * Default constructor.
          */
@@ -529,12 +495,25 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
         /** {@inheritDoc} */
         @Override protected void body() throws InterruptedException, IgniteInterruptedCheckedException {
             while (!stopping && !isCancelled()) {
-                Thread.sleep(prewarmCfg.getRuntimeDumpDelay());
 
-                if (stopping)
-                    break;
+                long timeout;
+                long wakeTs = prewarmCfg.getRuntimeDumpDelay() + U.currentTimeMillis();
+
+                synchronized (monitor) {
+                    while (!stopping && (timeout = wakeTs - U.currentTimeMillis()) > 0)
+                        monitor.wait(timeout);
+                }
 
                 dumpLoadedPagesIds(false);
+            }
+        }
+
+        /**
+         *
+         */
+        void wakeUp() {
+            synchronized (monitor) {
+                monitor.notify();
             }
         }
     }
