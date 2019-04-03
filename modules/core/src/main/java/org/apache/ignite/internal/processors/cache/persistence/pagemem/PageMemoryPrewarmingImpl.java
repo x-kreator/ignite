@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.apache.ignite.DataRegionMetrics;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
@@ -176,7 +175,7 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
     /** {@inheritDoc} */
     @Override public void start() throws IgniteException {
         if (pageIdsSupplier != null)
-            pageIdsSupplier.initDir();
+            pageIdsSupplier.initStore();
 
         if (prewarmCfg.isWaitPrewarmingOnStart()) {
             prewarmThread = Thread.currentThread();

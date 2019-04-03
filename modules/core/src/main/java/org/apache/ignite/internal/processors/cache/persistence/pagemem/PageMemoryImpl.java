@@ -34,7 +34,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
@@ -1476,9 +1475,9 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /** {@inheritDoc} */
-    @Override public IgniteInternalFuture<Void> forEachAsync(BiConsumer<FullPageId, Long> act) {
+    @Override public IgniteInternalFuture<Void> forEachAsync(LoadedPagesMap.CellConsumer act) {
         return forEachSegmentAsync(seg -> seg.loadedPages.forEach(
-            (fullPageId, val) -> act.accept(fullPageId, PageHeader.readTimestamp(seg.absolute(val)))));
+            (grpId, pageId, val) -> act.accept(grpId, pageId, PageHeader.readTimestamp(seg.absolute(val)))));
     }
 
     /** {@inheritDoc} */

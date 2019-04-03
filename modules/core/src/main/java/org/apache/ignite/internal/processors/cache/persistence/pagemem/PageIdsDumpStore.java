@@ -23,15 +23,30 @@ import java.util.function.Supplier;
  */
 public interface PageIdsDumpStore {
     /**
-     * @param part Partition.
-     * @param zone Zone.
+     * @return ID of newly created dump.
      */
-    public void savePartition(Partition part, int zone);
+    public String createDump();
 
     /**
-     *
+     * Finish active dump.
      */
-    public Iterable<Zone> zones();
+    public void finishDump();
+
+    /**
+     * @param partitions Partitions.
+     */
+    public void save(Iterable<Partition> partitions);
+
+    /**
+     * @param consumer Consumer.
+     */
+    public void forEach(FullPageIdConsumer consumer);
+
+    /**
+     * @param consumer Consumer.
+     * @param dumpId Dump ID.
+     */
+    public void forEach(FullPageIdConsumer consumer, String dumpId);
 
     /**
      *
@@ -49,17 +64,17 @@ public interface PageIdsDumpStore {
         private final int cacheId;
 
         /** */
-        private final Supplier<int[]> pageIdxSupplier;
+        private final int[] pageIndexes;
 
         /**
          * @param id Id.
          * @param cacheId Cache id.
-         * @param pageIdxSupplier Page indexes supplier.
+         * @param pageIndexes Page indexes.
          */
-        public Partition(int id, int cacheId, Supplier<int[]> pageIdxSupplier) {
+        public Partition(int id, int cacheId, int[] pageIndexes) {
             this.id = id;
             this.cacheId = cacheId;
-            this.pageIdxSupplier = pageIdxSupplier;
+            this.pageIndexes = pageIndexes;
         }
 
         /**
@@ -79,8 +94,8 @@ public interface PageIdsDumpStore {
         /**
          *
          */
-        public Supplier<int[]> pageIdxSupplier() {
-            return pageIdxSupplier;
+        public int[] pageIndexes() {
+            return pageIndexes;
         }
     }
 
