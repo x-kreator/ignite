@@ -52,7 +52,7 @@ import static org.apache.ignite.internal.stat.IoStatisticsType.CACHE_GROUP;
 /**
  * Default {@link PageMemoryPrewarming} implementation.
  */
-public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPagesTracker {
+public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming {
     /** Throttle time in nanoseconds. */
     private static final long THROTTLE_TIME_NANOS = 4_000;
 
@@ -68,8 +68,8 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
     /** Prewarming configuration. */
     private final PrewarmingConfiguration prewarmCfg;
 
-    /** Prewarming page IDs supplier. */
-    private final PrewarmingPageIdsSupplier pageIdsSupplier;
+    /** Last loaded page IDs store. */
+    private final LastLoadedPagesIdsStore lastLoadedPagesIdsStore;
 
     /** Custom prewarming page IDs supplier. */
     private final Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier;
@@ -119,14 +119,14 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
     /**
      * @param dataRegName Data region name.
      * @param prewarmCfg Prewarming configuration.
-     * @param pageIdsSupplier Prewarming page IDs supplier.
+     * @param lastLoadedPagesIdsStore Last loaded page IDs store.
      * @param dataRegMetrics Data region metrics.
      * @param ctx Cache shared context.
      */
     public PageMemoryPrewarmingImpl(
         String dataRegName,
         PrewarmingConfiguration prewarmCfg,
-        PrewarmingPageIdsSupplier pageIdsSupplier,
+        LastLoadedPagesIdsStore lastLoadedPagesIdsStore,
         DataRegionMetrics dataRegMetrics,
         GridCacheSharedContext<?, ?> ctx) {
 
@@ -144,12 +144,10 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
         Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier = prewarmCfg.getCustomPageIdsSupplier();
 
-        assert customPageIdsSupplier != null ^ pageIdsSupplier != null;
+        assert customPageIdsSupplier != null ^ lastLoadedPagesIdsStore != null;
 
-        this.pageIdsSupplier = pageIdsSupplier;
+        this.lastLoadedPagesIdsStore = lastLoadedPagesIdsStore;
         this.customPageIdsSupplier = customPageIdsSupplier;
-
-        int dumpReadThread = prewarmCfg.getDumpReadThreads();
 
         if (dumpReadThread > 1) {
             dumpReadSvc = new ThreadPoolExecutor(
@@ -168,14 +166,19 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
     @Override public void pageMemory(PageMemoryEx pageMem) {
         this.pageMem = pageMem;
 
-        if (pageIdsSupplier != null)
-            pageIdsSupplier.pageMemory(pageMem);
+        if (lastLoadedPagesIdsStore != null)
+            lastLoadedPagesIdsStore.pageMemory(pageMem);
+    }
+
+    /** {@inheritDoc} */
+    @Override public void onPageReplacementStarted() {
+        stopPrewarm = true;
     }
 
     /** {@inheritDoc} */
     @Override public void start() throws IgniteException {
-        if (pageIdsSupplier != null)
-            pageIdsSupplier.initStore();
+        if (lastLoadedPagesIdsStore != null)
+            lastLoadedPagesIdsStore.initStore();
 
         if (prewarmCfg.isWaitPrewarmingOnStart()) {
             prewarmThread = Thread.currentThread();
@@ -209,25 +212,10 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
             throw new IgniteException(e);
         }
 
-        if (pageIdsSupplier != null)
-            pageIdsSupplier.stop();
+        if (lastLoadedPagesIdsStore != null)
+            lastLoadedPagesIdsStore.stop();
         else if (customPageIdsSupplier instanceof LifecycleAware)
             ((LifecycleAware)customPageIdsSupplier).stop();
-    }
-
-    /** {@inheritDoc} */
-    @Override public void onPageLoad(int grpId, long pageId) {
-        // No-op
-    }
-
-    /** {@inheritDoc} */
-    @Override public void onPageUnload(int grpId, long pageId) {
-        // No-op
-    }
-
-    /** {@inheritDoc} */
-    @Override public void onPageEvicted(int grpId, long pageId) {
-        stopPrewarm = true;
     }
 
     /**
@@ -235,8 +223,6 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
      */
     private void prewarm() {
         ExecutorService[] workers = null;
-
-        boolean dumpReadMultithreaded = prewarmCfg.getDumpReadThreads() > 1;
 
         boolean pageLoadMultithreaded = prewarmCfg.getPageLoadThreads() > 1;
 
@@ -253,11 +239,11 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
                         entry1.getKey(),
                         entry1.getValue())))
                 .collect(Collectors.toList())) :
-            pageIdsSupplier.get();
+            lastLoadedPagesIdsStore.get();
 
         /*Map<?, Map<Integer, Supplier<int[]>>> pageIdsMap = useCustomPageIds ?
             customPageIdsSupplier.get() :
-            pageIdsSupplier.get();*/
+            lastLoadedPagesIdsStore.get();*/
 
         initReadsRate();
 
@@ -344,8 +330,8 @@ public class PageMemoryPrewarmingImpl implements PageMemoryPrewarming, LoadedPag
 
             prewarmThread = null;
 
-            if (pageIdsSupplier != null)
-                pageIdsSupplier.start();
+            if (lastLoadedPagesIdsStore != null)
+                lastLoadedPagesIdsStore.start();
             else if (customPageIdsSupplier instanceof LifecycleAware)
                 ((LifecycleAware)customPageIdsSupplier).start();
         }

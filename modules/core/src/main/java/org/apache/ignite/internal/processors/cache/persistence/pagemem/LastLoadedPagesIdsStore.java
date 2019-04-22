@@ -17,22 +17,18 @@
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.function.LongPredicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
@@ -42,10 +38,7 @@ import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.store.IgnitePageStoreManager;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
-import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager;
-import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
-import org.apache.ignite.internal.util.typedef.T3;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
 import org.apache.ignite.lifecycle.LifecycleAware;
@@ -53,13 +46,13 @@ import org.apache.ignite.thread.IgniteThread;
 
 import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_MASK;
 import static org.apache.ignite.internal.pagemem.PageIdUtils.PAGE_IDX_SIZE;
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_MASK;
 import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_SIZE;
 
 /**
  *
  */
-public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTracker,
-    Supplier<List<List<T3<Integer, Integer, Supplier<int[]>>>>> {
+public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource {
     /** Prewarming page IDs dump directory name. */
     private static final String PREWARM_DUMP_DIR = "prewarm";
 
@@ -79,13 +72,13 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     private final ConcurrentMap<Long, Partition> segments = new ConcurrentHashMap<>();
 
     /** Dump worker. */
-    private volatile LoadedPagesIdsDumpWorker dumpWorker;
+    private volatile DumpWorker dumpWorker;
 
     /** Page memory. */
     private volatile PageMemoryEx pageMem;
 
     /** Page IDs store. */
-    private volatile PageIdsDumpStore pageIdsStore;
+    private volatile PageIdsDumpStore dumpStore;
 
     /** Stopping flag. */
     private volatile boolean stopping;
@@ -98,14 +91,14 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
      * @param dataRegName Data region name.
      * @param prewarmCfg Prewarming configuration.
      */
-    public PrewarmingPageIdsSupplier(
+    public LastLoadedPagesIdsStore(
         String dataRegName,
         PrewarmingConfiguration prewarmCfg,
         GridCacheSharedContext<?, ?> ctx) {
         this.dataRegName = dataRegName;
         this.prewarmCfg = prewarmCfg;
         this.ctx = ctx;
-        this.log = ctx.logger(PrewarmingPageIdsSupplier.class);
+        this.log = ctx.logger(LastLoadedPagesIdsStore.class);
     }
 
     /**
@@ -121,13 +114,13 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
         if (!U.mkdirs(dumpDir))
             throw new IgniteException("Could not create directory for prewarming data: " + dumpDir);
 
-        pageIdsStore = new FilePageIdsDumpStore(dumpDir, log);
+        dumpStore = new FilePageIdsDumpStore(dumpDir, log);
     }
 
     /** {@inheritDoc} */
     @Override public void start() throws IgniteException {
         if (prewarmCfg.getRuntimeDumpDelay() > PrewarmingConfiguration.RUNTIME_DUMP_DISABLED) {
-            dumpWorker = new LoadedPagesIdsDumpWorker();
+            dumpWorker = new DumpWorker();
 
             new IgniteThread(dumpWorker).start();
         }
@@ -137,7 +130,7 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     @Override public void stop() throws IgniteException {
         stopping = true;
 
-        LoadedPagesIdsDumpWorker dumpWorker = this.dumpWorker;
+        DumpWorker dumpWorker = this.dumpWorker;
 
         if (dumpWorker != null) {
             dumpWorker.wakeUp();
@@ -152,44 +145,13 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
             }
         }
         else
-            dumpLoadedPagesIds(true);
+            dumpLoadedPagesIds();
     }
 
     /** {@inheritDoc} */
-    @Override public void onPageLoad(int grpId, long pageId) {
-        if (prewarmCfg.isIndexesOnly() &&
-            PageIdUtils.partId(pageId) != PageIdAllocator.INDEX_PARTITION)
-            return;
-
-        getSegment(Partition.key(grpId, pageId)).incCount();
-    }
-
-    /** {@inheritDoc} */
-    @Override public void onPageUnload(int grpId, long pageId) {
-        if (prewarmCfg.isIndexesOnly() &&
-            PageIdUtils.partId(pageId) != PageIdAllocator.INDEX_PARTITION)
-            return;
-
-        getSegment(Partition.key(grpId, pageId)).decCount();
-    }
-
-    /** {@inheritDoc} */
-    @Override public void onPageEvicted(int grpId, long pageId) {
-        onPageUnload(grpId, pageId);
-    }
-
-    /** {@inheritDoc} */
-    @Override public List<List<T3<Integer, Integer, Supplier<int[]>>>> get() {
-        List<List<T3<Integer, Integer, Supplier<int[]>>>> zones = new ArrayList<>();
-
-        for (PageIdsDumpStore.Zone zone : pageIdsStore.zones()) {
-            
-            for (PageIdsDumpStore.Partition partition : zone.partitions()) {
-
-            }
-        }
-
-        return zones;
+    @Override public void forEach(FullPageIdConsumer consumer) {
+        // TODO check running
+        dumpStore.forEach(consumer);
     }
 
     /**
@@ -203,6 +165,15 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
      *
      */
     private void dumpLoadedPagesIds() {
+        /*if (prewarmThread != null) { // FIXME
+            if (onStopping)
+                U.warn(log, "Attempt dump of loaded pages IDs on stopping while prewarming process is running!");
+
+            return;
+        }*/
+
+        loadedPagesDumpInProgress = true;
+
         try {
             if (log.isInfoEnabled())
                 log.info("Starting dump of loaded pages IDs of DataRegion [name=" + dataRegName + "]");
@@ -252,48 +223,70 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
                 seg.cnt = 0;
             }
 
-            double dumpPercentage = prewarmCfg.getDumpPercentage();
+            if (pageIdsCnt == 0) {
+                if (log.isInfoEnabled())
+                    log.info("No loaded pages in DataRegion [name=" + dataRegName + "], no dump was created");
 
-            assert dumpPercentage > 0 : "Dump percentage must be greater than 0";
-
-            if (dumpPercentage < 1.0) {
-                parts.forEach(part -> Arrays.sort(part.pageIdxTsArr, 0, part.pageIdxI));
-
-                long pageIdsLeft = (long)Math.floor(pageIdsCnt * dumpPercentage);
-
-                Partition head = Collections.min(parts, Partition.byCoolingAtCnt);
-
-                while (pageIdsLeft > 0) {
-                    Partition head0 = head;
-
-                    Optional<Partition> nextOpt = parts.stream().filter(seg -> seg != head0).min(Partition.byCoolingAtCnt);
-
-                    if (!nextOpt.isPresent()) {
-                        head.addCount(Math.min((int)pageIdsLeft, head.pageIdxI - head.cnt));
-
-                        pageIdsLeft = 0;
-                    }
-                    else {
-                        Partition next = nextOpt.get();
-
-                        while (Partition.byCoolingAtCnt.compare(head, next) <= 0) {
-                            head.incCount();
-
-                            if (--pageIdsLeft == 0)
-                                break;
-                        }
-
-                        head = next;
-                    }
-                }
-
-                
+                return;
             }
 
-            // long
-            // TODO sort part idx arrays and parts!
+            double hottestZoneRatio = prewarmCfg.getHottestZoneRatio();
+
+            String dumpId = dumpStore.createDump();
+
+            try {
+                if (hottestZoneRatio > .0 && hottestZoneRatio < 1.0) {
+                    parts.forEach(part -> Arrays.sort(part.pageIdxTsArr, 0, part.pageIdxI));
+
+                    long pageIdsLeft = (long)Math.floor(pageIdsCnt * hottestZoneRatio);
+
+                    Partition head = Collections.min(parts, Partition.byCoolingAtCnt);
+
+                    while (pageIdsLeft > 0) {
+                        Partition head0 = head;
+
+                        Optional<Partition> nextOpt = parts.stream().filter(seg -> seg != head0).min(Partition.byCoolingAtCnt);
+
+                        if (!nextOpt.isPresent()) {
+                            head.addCount(Math.min((int)pageIdsLeft, head.pageIdxI - head.cnt));
+
+                            pageIdsLeft = 0;
+                        }
+                        else {
+                            Partition next = nextOpt.get();
+
+                            while (Partition.byCoolingAtCnt.compare(head, next) <= 0) {
+                                head.incCount();
+
+                                if (--pageIdsLeft == 0)
+                                    break;
+                            }
+
+                            head = next;
+                        }
+                    }
+
+                    dumpStore.save(parts.stream().filter(part -> part.cnt > 0)
+                        .map(part -> part.toDumpStorePartition(part::headPageIndexes))
+                        .collect(Collectors.toList()));
+                }
+
+                dumpStore.save(parts.stream().filter(part -> part.pageIdxI - part.cnt > 0)
+                    .map(part -> part.toDumpStorePartition(part::tailPageIndexes))
+                    .collect(Collectors.toList()));
+            }
+            finally {
+                dumpStore.finishDump();
+
+                long dumpTime = U.currentTimeMillis() - startTs;
+
+                if (log.isInfoEnabled()) {
+                    log.info("Dump of loaded pages IDs of DataRegion [name=" + dataRegName + "] finished in " +
+                        dumpTime + " ms [dumpId=" + dumpId + ", pageIdsCount=" + pageIdsCnt + "]");
+                }
+            }
         }
-        catch (IgniteCheckedException e) {
+        catch (IgniteCheckedException | IgniteException e) {
             U.warn(log, "Dump of loaded pages IDs for DataRegion [name=" + dataRegName + "] failed", e);
         }
         finally {
@@ -302,142 +295,10 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     }
 
     /**
-     * @param onStopping On stopping.
-     */
-    private void dumpLoadedPagesIds(boolean onStopping) {
-        /*if (prewarmThread != null) { // FIXME
-            if (onStopping)
-                U.warn(log, "Attempt dump of loaded pages IDs on stopping while prewarming process is running!");
-
-            return;
-        }*/
-
-        loadedPagesDumpInProgress = true;
-
-        try {
-            if (!onStopping && stopping)
-                return;
-
-            if (log.isInfoEnabled())
-                log.info("Starting dump of loaded pages IDs of DataRegion [name=" + dataRegName + "]");
-
-            final ConcurrentMap<Long, Partition> updated = new ConcurrentHashMap<>();
-
-            final long startTs = U.currentTimeMillis();
-
-            pageMem.forEachAsync((grpId, pageId, touchTs) -> {
-                if (prewarmCfg.isIndexesOnly() &&
-                    PageIdUtils.partId(pageId) != PageIdAllocator.INDEX_PARTITION)
-                    return;
-
-                long segmentKey = Partition.key(grpId, pageId);
-
-                Partition seg = !onStopping && stopping ?
-                    updated.get(segmentKey) :
-                    updated.computeIfAbsent(segmentKey,
-                        key -> getSegment(key).resetModifiedAndGet());
-
-                if (seg != null)
-                    seg.addPageIdx(pageId, touchTs); // FIXME use startTs - touchTs instead touchTs!
-            }).get();
-
-            // TODO use prewarmCfg.getDumpPercentage() for dump limit
-
-            int segUpdated = 0;
-
-            for (Partition seg : updated.values()) {
-                if (!onStopping && stopping && seg.modified)
-                    continue;
-
-                try {
-                    updateSegment(seg);
-
-                    segUpdated++;
-                }
-                catch (IOException e) {
-                    throw new IgniteCheckedException(e);
-                }
-            }
-
-            long dumpTime = U.currentTimeMillis() - startTs;
-
-            if (log.isInfoEnabled()) {
-                log.info("Dump of loaded pages IDs of DataRegion [name=" + dataRegName + "] finished in " +
-                    dumpTime + " ms, segments updated: " + segUpdated);
-            }
-        }
-        catch (IgniteCheckedException e) {
-            U.warn(log, "Dump of loaded pages IDs for DataRegion [name=" + dataRegName + "] failed", e);
-        }
-        finally {
-            loadedPagesDumpInProgress = false;
-        }
-    }
-
-    /**
      * @param key Partition key.
      */
-    private Partition getSegment(long key) {
+    private Partition getPart(long key) {
         return segments.computeIfAbsent(key, Partition::new);
-    }
-
-    /**
-     * @param seg Partition.
-     */
-    private void updateSegment(Partition seg) throws IOException {
-        long[] pageIdxTsArr = seg.pageIdxTsArr;
-
-        seg.pageIdxTsArr = null;
-
-        File segFile = new File(dumpDir, seg.fileName());
-
-        if (pageIdxTsArr.length == 0) {
-            if (!segFile.delete())
-                U.warn(log, "Failed to delete prewarming dump file: " + segFile.getName());
-
-            return;
-        }
-
-        int heatTimeQuantum = prewarmCfg.getHeatTimeQuantum();
-
-        int curTime = (int)(U.currentTimeMillis() / 1000 / heatTimeQuantum);
-
-        for (int i = 0; i < pageIdxTsArr.length; i++) {
-            long pageIdxTs = pageIdxTsArr[i];
-
-            pageIdxTsArr[i] = (pageIdxTs & PAGE_IDX_MASK) |
-                ((curTime - (pageIdxTs >> PAGE_IDX_SIZE) / heatTimeQuantum) << PAGE_IDX_SIZE);
-        }
-
-        Arrays.sort(pageIdxTsArr);
-
-        try (FileIO io = new RandomAccessFileIO(segFile,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING)) {
-
-            byte[] chunk = new byte[Integer.BYTES * 1024];
-
-            int chunkPtr = 0;
-
-            for (long pageIdxTs : pageIdxTsArr) {
-                int pageIdx = (int)(pageIdxTs & PAGE_IDX_MASK);
-
-                chunkPtr = U.intToBytes(pageIdx, chunk, chunkPtr);
-
-                if (chunkPtr == chunk.length) {
-                    io.write(chunk, 0, chunkPtr);
-                    io.force();
-
-                    chunkPtr = 0;
-                }
-            }
-
-            if (chunkPtr > 0) {
-                io.write(chunk, 0, chunkPtr);
-                io.force();
-            }
-        }
     }
 
     /**
@@ -481,6 +342,13 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
          */
         Partition(long key) {
             this.key = key;
+        }
+
+        /**
+         *
+         */
+        int id() {
+            return (int)(key & PART_ID_MASK);
         }
 
         /**
@@ -553,6 +421,50 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
         }
 
         /**
+         *
+         */
+        int[] headPageIndexes() {
+            return pageIndexes(0, cnt);
+        }
+
+        /**
+         *
+         */
+        int[] tailPageIndexes() {
+            return pageIndexes(cnt, pageIdxI);
+        }
+
+        /**
+         * @param fromIdx From index.
+         * @param toIdx To index.
+         */
+        int[] pageIndexes(int fromIdx, int toIdx) {
+            long[] pageIdxTsArr = this.pageIdxTsArr;
+
+            assert fromIdx >= 0
+                && fromIdx <= toIdx
+                && toIdx <= pageIdxTsArr.length;
+
+            int[] pageIndexes = new int[toIdx - fromIdx];
+
+            for (int i = 0; i < pageIndexes.length; i++)
+                pageIndexes[i] = (int)(pageIdxTsArr[i + fromIdx] & PAGE_IDX_MASK);
+
+            return pageIndexes;
+        }
+
+        /**
+         *
+         */
+        PageIdsDumpStore.Partition toDumpStorePartition(Supplier<int[]> pageIdxSupplier) {
+            int[] pageIndexes = pageIdxSupplier.get();
+
+            Arrays.sort(pageIndexes);
+
+            return new PageIdsDumpStore.Partition(id(), cacheId(), pageIndexes);
+        }
+
+        /**
          * @param grpId Group id.
          * @param pageId Page id.
          */
@@ -564,7 +476,7 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
     /**
      *
      */
-    private class LoadedPagesIdsDumpWorker extends GridWorker {
+    private class DumpWorker extends GridWorker {
         /** */
         private static final String NAME_SUFFIX = "-loaded-pages-ids-dump-worker";
 
@@ -574,8 +486,8 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
         /**
          * Default constructor.
          */
-        LoadedPagesIdsDumpWorker() {
-            super(ctx.igniteInstanceName(), dataRegName + NAME_SUFFIX, PrewarmingPageIdsSupplier.this.log);
+        DumpWorker() {
+            super(ctx.igniteInstanceName(), dataRegName + NAME_SUFFIX, LastLoadedPagesIdsStore.this.log);
         }
 
         /** {@inheritDoc} */
@@ -590,7 +502,7 @@ public class PrewarmingPageIdsSupplier implements LifecycleAware, LoadedPagesTra
                         monitor.wait(timeout);
                 }
 
-                dumpLoadedPagesIds(false);
+                dumpLoadedPagesIds();
             }
         }
 

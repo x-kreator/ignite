@@ -78,7 +78,6 @@ import org.apache.ignite.internal.processors.query.GridQueryRowCacheCleaner;
 import org.apache.ignite.internal.stat.IoStatisticsHolder;
 import org.apache.ignite.internal.stat.IoStatisticsHolderNoOp;
 import org.apache.ignite.internal.util.GridConcurrentHashSet;
-import org.apache.ignite.internal.util.GridConcurrentLinkedHashSet;
 import org.apache.ignite.internal.util.GridLongList;
 import org.apache.ignite.internal.util.GridMultiCollectionWrapper;
 import org.apache.ignite.internal.util.GridUnsafe;
@@ -285,9 +284,6 @@ public class PageMemoryImpl implements PageMemoryEx {
     /** Prewarming. */
     @Nullable private final PageMemoryPrewarming prewarming;
 
-    /** Loaded pages trackers. */
-    @Nullable private final Collection<LoadedPagesTracker> loadedPagesTrackers = new GridConcurrentLinkedHashSet<>();
-
     /**
      * Marker that stop was invoked and memory is not supposed for any usage.
      */
@@ -337,9 +333,6 @@ public class PageMemoryImpl implements PageMemoryEx {
         this.cpProgressProvider = cpProgressProvider;
 
         this.prewarming = prewarming;
-
-        if (prewarming instanceof LoadedPagesTracker)
-            loadedPagesTrackers.add((LoadedPagesTracker)prewarming);
 
         storeMgr = ctx.pageStore();
         walMgr = ctx.wal();
@@ -622,8 +615,6 @@ public class PageMemoryImpl implements PageMemoryEx {
             }
 
             seg.loadedPages.put(grpId, PageIdUtils.effectivePageId(pageId), relPtr, seg.partGeneration(grpId, partId));
-
-            trackPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
         }
         catch (IgniteOutOfMemoryException oom) {
             DataRegionConfiguration dataRegionCfg = getDataRegionConfiguration();
@@ -801,8 +792,6 @@ public class PageMemoryImpl implements PageMemoryEx {
                     seg.partGeneration(grpId, partId)
                 );
 
-                trackPageLoad(grpId, PageIdUtils.effectivePageId(pageId));
-
                 long pageAddr = absPtr + PAGE_OVERHEAD;
 
                 if (!restore) {
@@ -944,11 +933,8 @@ public class PageMemoryImpl implements PageMemoryEx {
             checkpointPool.releaseFreePage(tmpBufPtr);
         }
 
-        if (rmv) {
+        if (rmv)
             seg.loadedPages.remove(grpId, PageIdUtils.effectivePageId(pageId));
-
-            trackPageUnload(grpId, PageIdUtils.effectivePageId(pageId));
-        }
 
         Collection<FullPageId> cpPages = seg.segCheckpointPages;
 
@@ -1462,8 +1448,6 @@ public class PageMemoryImpl implements PageMemoryEx {
 
                 if (rmvDirty)
                     seg.dirtyPages.remove(fullId);
-
-                trackPageUnload(fullId.groupId(), fullId.effectivePageId());
 
                 GridUnsafe.setMemory(absPtr + PAGE_OVERHEAD, pageSize(), (byte)0);
 
@@ -2061,47 +2045,6 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /**
-     * @param tracker Loaded pages tracker.
-     */
-    public void addLoadedPagesTracker(LoadedPagesTracker tracker) {
-        loadedPagesTrackers.add(tracker);
-    }
-
-    /**
-     * @param tracker Loaded pages tracker.
-     */
-    public void removeLoadedPagesTracker(LoadedPagesTracker tracker) {
-        loadedPagesTrackers.remove(tracker);
-    }
-
-    /**
-     * @param grpId Group id.
-     * @param pageId Page id.
-     */
-    private void trackPageLoad(int grpId, long pageId) {
-        for (LoadedPagesTracker tracker : loadedPagesTrackers)
-            tracker.onPageLoad(grpId, pageId);
-    }
-
-    /**
-     * @param grpId Group id.
-     * @param pageId Page id.
-     */
-    private void trackPageUnload(int grpId, long pageId) {
-        for (LoadedPagesTracker tracker : loadedPagesTrackers)
-            tracker.onPageUnload(grpId, pageId);
-    }
-
-    /**
-     * @param grpId Group id.
-     * @param pageId Page id.
-     */
-    private void trackPageEvicted(int grpId, long pageId) {
-        for (LoadedPagesTracker tracker : loadedPagesTrackers)
-            tracker.onPageEvicted(grpId, pageId);
-    }
-
-    /**
      *
      */
     private class Segment extends ReentrantReadWriteLock {
@@ -2371,6 +2314,9 @@ public class PageMemoryImpl implements PageMemoryEx {
             if (!pageReplacementWarned) {
                 pageReplacementWarned = true;
 
+                if (prewarming != null)
+                    prewarming.onPageReplacementStarted();
+
                 U.warn(log, "Page replacements started, pages will be rotated with disk, " +
                     "this will affect storage performance (consider increasing DataRegionConfiguration#setMaxSize).");
             }
@@ -2505,8 +2451,6 @@ public class PageMemoryImpl implements PageMemoryEx {
                     fullPageId.effectivePageId()
                 );
 
-                trackPageUnload(fullPageId.groupId(), fullPageId.effectivePageId());
-
                 return relRmvAddr;
             }
         }
@@ -2579,8 +2523,6 @@ public class PageMemoryImpl implements PageMemoryEx {
                         fullPageId.groupId(),
                         fullPageId.effectivePageId()
                     );
-
-                    trackPageEvicted(fullPageId.groupId(), fullPageId.effectivePageId());
 
                     return addr;
                 }

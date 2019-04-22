@@ -19,42 +19,45 @@ package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
-import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
 import org.apache.ignite.internal.util.typedef.internal.SB;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
+import static org.apache.ignite.internal.pagemem.PageIdUtils.PART_ID_MASK;
+
 /**
  *
  */
 public class FilePageIdsDumpStore implements PageIdsDumpStore {
-    /** Segment file extension. */
-    private static final String SEG_FILE_EXT = ".seg";
-
     /** File name length. */
-    private static final int FILE_NAME_LENGTH = 12;
+    private static final int FILE_NAME_LENGTH = 16;
 
-    /** Group ID prefix length. */
-    private static final int GRP_ID_PREFIX_LENGTH = 8;
+    /** Dump file suffix. */
+    private static final String DUMP_FILE_SUFFIX = ".dump";
 
     /** File name pattern. */
-    private static final Pattern FILE_NAME_PATTERN = Pattern.compile("[0-9A-Fa-f]{" + FILE_NAME_LENGTH + "}\\" + SEG_FILE_EXT);
+    private static final Pattern FILE_NAME_PATTERN = Pattern.compile("\\d{" + FILE_NAME_LENGTH + "}\\" + DUMP_FILE_SUFFIX);
 
     /** File filter. */
     private static final FileFilter FILE_FILTER = file -> !file.isDirectory() && FILE_NAME_PATTERN.matcher(file.getName()).matches();
+
+    /** Comparator by partition ID. */
+    private static final Comparator<Partition> BY_PART_ID = Comparator.comparingInt(Partition::id);
 
     /** Small page count threshold. */
     private static final int SMALL_PAGE_COUNT_THRESHOLD = 4;
@@ -77,11 +80,8 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
     /** */
     private final IgniteLogger log;
 
-    /** Active dump file. */
-    private File dumpFile;
-
-    /** Active dump file IO. */
-    private volatile FileIO dumpIO;
+    /** Dump context. */
+    private volatile DumpContext dumpCtx;
 
     /**
      * @param dumpDir Page IDs dump directory.
@@ -93,13 +93,13 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
 
     /** {@inheritDoc} */
     @Override public String createDump() {
-        if (dumpIO != null)
+        if (dumpCtx != null)
             throw new IllegalStateException("Attempt to create new dump while other one still active");
 
         long ts = U.currentTimeMillis();
 
         while (true) {
-            String dumpId = String.valueOf(ts);
+            String dumpId = toDumpId(ts);
 
             if (new File(dumpDir, dumpId + ".dump").exists()) {
                 ts += 10;
@@ -108,10 +108,7 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
             }
 
             try {
-                dumpIO = new RandomAccessFileIO(dumpFile = new File(dumpDir, dumpId + ".dump.new"),
-                    StandardOpenOption.WRITE,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING);
+                dumpCtx = new DumpContext(dumpId, true);
 
                 return dumpId;
             }
@@ -121,84 +118,91 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
         }
     }
 
+    /**
+     * @param val Value.
+     */
+    private static String toDumpId(long val) {
+        SB b = new SB();
+
+        String keyHex = Long.toHexString(val);
+
+        for (int i = keyHex.length(); i < FILE_NAME_LENGTH; i++)
+            b.a('0');
+
+        return b.a(keyHex).toString();
+    }
+
     /** {@inheritDoc} */
     @Override public void finishDump() {
-        FileIO dumpIO = this.dumpIO;
+        DumpContext dumpCtx = this.dumpCtx;
 
-        if (dumpIO == null)
+        if (dumpCtx == null)
             throw new IllegalStateException("No active dump found");
 
-        try {
-            dumpIO.force();
-            dumpIO.close();
-        }
-        catch (IOException e) {
-            throw new IgniteException("Dump finish failed", e);
-        }
+        dumpCtx.finish();
 
-        assert dumpFile != null
-            && dumpFile.exists()
-            && dumpFile.getName().endsWith(".new");
-
-        try {
-            String dumpFileName = dumpFile.getName();
-
-            if (!dumpFile.renameTo(new File(dumpDir, dumpFileName.substring(0, dumpFileName.length() - 4))))
-                log.warning("Failed rename of dump file [name=" + dumpFileName + "]");
-        }
-        finally {
-            dumpFile = null;
-
-            this.dumpIO = null;
-        }
+        this.dumpCtx = null;
     }
 
     /** {@inheritDoc} */
     @Override public void save(Iterable<Partition> partitions) {
-        FileIO dumpIO = this.dumpIO;
+        DumpContext dumpCtx = this.dumpCtx;
 
-        if (dumpIO == null)
+        if (dumpCtx == null)
             throw new IllegalStateException("No active dump found");
 
         Map<Integer, int[]> cacheSmallPartsCounts = cacheSmallPartsCounts(partitions);
 
-        int smallPartsCnt = cacheSmallPartsCounts.values().stream()
-            .mapToInt(FilePageIdsDumpStore::totalPartsCount)
-            .sum();
+        Map<Integer, List<Partition>> cacheSmallParts = new HashMap<>(cacheSmallPartsCounts.size());
 
-        Set<Partition> smallParts = new HashSet<>(smallPartsCnt);
+        try {
+            for (Partition part : partitions) {
+                int pageCnt = part.pageIndexes().length;
 
-        for (Partition part : partitions) {
-            int pageCnt = part.pageIndexes().length;
+                if (pageCnt == 0)
+                    continue;
 
-            if (pageCnt == 0)
-                continue;
+                if (pageCnt <= SMALL_PAGE_COUNT_THRESHOLD && cacheSmallPartsCounts.containsKey(part.cacheId())) {
+                    List<Partition> smallParts = cacheSmallParts.computeIfAbsent(
+                        part.cacheId(),
+                        cacheId -> new ArrayList<>(totalPartsCount(cacheSmallPartsCounts.get(cacheId))));
 
-            if (pageCnt <= SMALL_PAGE_COUNT_THRESHOLD && cacheSmallPartsCounts.containsKey(part.cacheId())) {
-                smallParts.add(part);
+                    smallParts.add(part);
 
-                continue;
+                    continue;
+                }
+
+                dumpCtx.writeInt(part.cacheId());
+                dumpCtx.writeShort((short)part.id());
+                dumpCtx.writeInt(part.pageIndexes().length);
+
+                for (int pageIdx : part.pageIndexes())
+                    dumpCtx.writeInt(pageIdx);
             }
 
+            for (Map.Entry<Integer, List<Partition>> entry : cacheSmallParts.entrySet()) {
+                List<Partition> cacheParts = entry.getValue();
 
+                cacheParts.sort(BY_PART_ID);
+
+                int cachePageIdsCnt = cacheParts.stream().mapToInt(p -> p.pageIndexes().length).sum();
+
+                dumpCtx.writeInt(0);
+                dumpCtx.writeInt(entry.getKey());
+                dumpCtx.writeInt(cachePageIdsCnt);
+
+                for (Partition part : cacheParts) {
+                    for (int pageIdx : part.pageIndexes()) {
+                        dumpCtx.writeShort((short)part.id());
+                        dumpCtx.writeInt(pageIdx);
+                    }
+                }
+            }
+
+            dumpCtx.flush();
         }
-    }
-
-    private void savePartition(Partition part, FileIO io) throws IOException {
-        byte[] chunk = new byte[Integer.BYTES * 1024];
-
-        int chunkPtr = U.intToBytes(part.cacheId(), chunk, 0);
-        chunkPtr = U.shortToBytes((short)part.id(), chunk, chunkPtr);
-        chunkPtr = U.intToBytes(part.pageIndexes().length, chunk, chunkPtr);
-
-        for (int pageIdx : part.pageIndexes()) {
-            chunkPtr = U.intToBytes(pageIdx, chunk, chunkPtr);
-
-            if (chunkPtr == chunk.length) {
-                io.write(chunk, 0, chunkPtr);
-
-                chunkPtr = 0;
-            }
+        catch (IOException e) {
+            throw new IgniteException("Failed to write dump data", e);
         }
     }
 
@@ -270,74 +274,86 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
 
     /** {@inheritDoc} */
     @Override public void forEach(FullPageIdConsumer consumer) {
+        File[] dumpFiles = dumpDir.listFiles(FILE_FILTER);
 
+        if (dumpFiles == null || dumpFiles.length == 0) {
+            if (log.isInfoEnabled())
+                log.info("Saved dump files not found!");
+
+            return;
+        }
+
+        if (log.isInfoEnabled())
+            log.info("Saved dump files found: " + dumpFiles.length);
+
+        File latestDumpFile = Collections.max(Arrays.asList(dumpFiles), Comparator.comparing(File::getName));
+
+        forEach(consumer, latestDumpFile);
     }
 
     /** {@inheritDoc} */
     @Override public void forEach(FullPageIdConsumer consumer, String dumpId) {
+        forEach(consumer, new File(dumpDir, dumpId + DUMP_FILE_SUFFIX));
+    }
 
+    /**
+     * @param consumer Consumer.
+     * @param dumpFile Dump file.
+     */
+    private void forEach(FullPageIdConsumer consumer, File dumpFile) {
+        try (DumpContext dumpCtx = new DumpContext(dumpFile)) {
+            String errorMsg = "Corrupted dump file [name" + dumpFile.getName() + "]";
+
+            do {
+                if (dumpCtx.availableBytes() < 10)
+                    throw new IOException(errorMsg);
+
+                int cacheId = dumpCtx.readInt();
+
+                if (cacheId == 0) { // Read cache
+                    cacheId = dumpCtx.readInt();
+
+                    int cnt = dumpCtx.readInt();
+
+                    if (dumpCtx.availableBytes() < cnt * (Short.BYTES + Integer.BYTES))
+                        throw new IOException(errorMsg);
+
+                    for (int i = 0; i < cnt; i++) {
+                        short partId = dumpCtx.readShort();
+                        int pageIdx = dumpCtx.readInt();
+
+                        long pageId = PageIdUtils.pageId(partId & (int)PART_ID_MASK, pageIdx);
+
+                        consumer.accept(cacheId, pageId);
+                    }
+                }
+                else { // Read partition
+                    short partId = dumpCtx.readShort();
+
+                    int cnt = dumpCtx.readInt();
+
+                    if (dumpCtx.availableBytes() < cnt * Integer.BYTES)
+                        throw new IOException(errorMsg);
+
+                    for (int i = 0; i < cnt; i++) {
+                        int pageIdx = dumpCtx.readInt();
+
+                        long pageId = PageIdUtils.pageId(partId & (int)PART_ID_MASK, pageIdx);
+
+                        consumer.accept(cacheId, pageId);
+                    }
+                }
+            }
+            while (dumpCtx.availableBytes() > 0);
+        }
+        catch (IOException e) {
+            throw new IgniteException("Failed to read dump file [name=" + dumpFile.getName() + "]", e);
+        }
     }
 
     /** {@inheritDoc} */
     @Override public void clear() {
-
-    }
-
-    /** {@inheritDoc} */
-    public Iterable<Zone> zones() { // FIXME remove!
-        File[] segFiles = dumpDir.listFiles(FILE_FILTER);
-
-        if (segFiles == null) {
-            if (log.isInfoEnabled())
-                log.info("Saved prewarming dump files not found!");
-
-            return Collections.emptyList();
-        }
-
-        if (log.isInfoEnabled())
-            log.info("Saved prewarming dump files found: " + segFiles.length);
-
-        List<PageIdsDumpStore.Partition> partitions = new ArrayList<>(segFiles.length);
-
-        for (File segFile : segFiles) {
-            try {
-                int partId = Integer.parseInt(segFile.getName().substring(
-                    GRP_ID_PREFIX_LENGTH,
-                    FILE_NAME_LENGTH), 16);
-
-                int grpId = (int)Long.parseLong(segFile.getName().substring(0, GRP_ID_PREFIX_LENGTH), 16);
-
-                partitions.add(new PageIdsDumpStore.Partition(grpId, partId, () -> {
-                    try {
-                        return loadPageIndexes(segFile);
-                    }
-                    catch (IOException e) {
-                        U.error(log, "Failed to read prewarming dump file: " + segFile.getName(), e);
-
-                        throw new IgniteException(e);
-                    }
-                }));
-            }
-            catch (NumberFormatException e) {
-                U.error(log, "Invalid prewarming dump file name: " + segFile.getName(), e);
-            }
-        }
-
-        return Collections.singleton(new PageIdsDumpStore.Zone(partitions, null)); // FIXME
-    }
-
-    /**
-     * @param partKey Partition key.
-     */
-    private String partFileName(long partKey) {
-        SB b = new SB();
-
-        String keyHex = Long.toHexString(partKey);
-
-        for (int i = keyHex.length(); i < FILE_NAME_LENGTH; i++)
-            b.a('0');
-
-        return b.a(keyHex).a(SEG_FILE_EXT).toString();
+        // TODO
     }
 
     /**
@@ -362,7 +378,10 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
     /**
      *
      */
-    private class DumpContext {
+    private class DumpContext implements AutoCloseable {
+        /** New file suffix. */
+        private static final String NEW_FILE_SUFFIX = ".new";
+
         /** */
         private final String dumpId;
 
@@ -378,6 +397,9 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
         /** */
         private int chunkPtr;
 
+        /** */
+        private int ioPtr;
+
         /**
          * @param dumpId Dump id.
          * @param isNew Is new.
@@ -385,7 +407,7 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
         DumpContext(String dumpId, boolean isNew) throws IOException {
             this.dumpId = dumpId;
 
-            dumpFile = new File(dumpDir, dumpId + (isNew ? ".dump.new" : ".dump"));
+            dumpFile = new File(dumpDir, dumpId + (isNew ? DUMP_FILE_SUFFIX + NEW_FILE_SUFFIX : DUMP_FILE_SUFFIX));
 
             dumpIO = isNew ?
                 new RandomAccessFileIO(dumpFile,
@@ -395,6 +417,121 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
                 new RandomAccessFileIO(dumpFile, StandardOpenOption.READ);
 
             chunk = new byte[isNew ? Integer.BYTES * 1024 : Integer.BYTES];
+        }
+
+        /**
+         * @param dumpFile Dump file.
+         */
+        DumpContext(File dumpFile) throws IOException {
+            this.dumpFile = dumpFile;
+
+            dumpId = dumpFile.getName().substring(0, dumpFile.getName().indexOf(DUMP_FILE_SUFFIX));
+
+            dumpIO = new RandomAccessFileIO(dumpFile, StandardOpenOption.READ);
+
+            chunk = new byte[Integer.BYTES];
+        }
+
+        /**
+         *
+         */
+        int readInt() throws IOException {
+            int bytesRead = dumpIO.read(chunk, 0, Integer.BYTES);
+
+            ioPtr += bytesRead;
+
+            if (bytesRead != Integer.BYTES)
+                throw new IOException("Failed to read dump file [id=" + dumpId + "]");
+
+            return U.bytesToInt(chunk, 0);
+        }
+
+        /**
+         * @param val Value.
+         */
+        void writeInt(int val) throws IOException {
+            if (chunkPtr + Integer.BYTES > chunk.length)
+                flushChunk();
+
+            chunkPtr = U.intToBytes(val, chunk, chunkPtr);
+        }
+
+        /**
+         *
+         */
+        short readShort() throws IOException {
+            int bytesRead = dumpIO.read(chunk, 0, Short.BYTES);
+
+            ioPtr += bytesRead;
+
+            if (bytesRead != Short.BYTES)
+                throw new IOException("Failed to read dump file [id=" + dumpId + "]");
+
+            return U.bytesToShort(chunk, 0);
+        }
+
+        /**
+         * @param val Value.
+         */
+        void writeShort(short val) throws IOException {
+            if (chunkPtr + Short.BYTES > chunk.length)
+                flushChunk();
+
+            chunkPtr = U.shortToBytes(val, chunk, chunkPtr);
+        }
+
+        /**
+         *
+         */
+        long availableBytes() throws IOException {
+            return dumpIO.size() - ioPtr;
+        }
+
+        /**
+         *
+         */
+        void flush() throws IOException {
+            if (chunkPtr > 0)
+                flushChunk();
+
+            dumpIO.force();
+        }
+
+        /**
+         *
+         */
+        private void flushChunk() throws IOException {
+            dumpIO.write(chunk, 0, chunkPtr);
+
+            chunkPtr = 0;
+        }
+
+        /**
+         *
+         */
+        void finish() {
+            try {
+                flush();
+
+                dumpIO.close();
+            }
+            catch (IOException e) {
+                throw new IgniteException("Dump finish failed", e);
+            }
+
+            assert dumpFile != null
+                && dumpFile.exists()
+                && dumpFile.getName().endsWith(NEW_FILE_SUFFIX);
+
+            String dumpFileName = dumpFile.getName();
+
+            if (!dumpFile.renameTo(new File(dumpDir, dumpId + DUMP_FILE_SUFFIX)))
+                log.warning("Failed rename of dump file [name=" + dumpFileName + "]");
+        }
+
+        /** {@inheritDoc} */
+        @Override public void close() throws IOException {
+            dumpIO.close();
         }
     }
 }

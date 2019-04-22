@@ -16,12 +16,10 @@
  */
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
-import java.util.function.Supplier;
-
 /**
  *
  */
-public interface PageIdsDumpStore {
+public interface PageIdsDumpStore extends FullPageIdSource {
     /**
      * @return ID of newly created dump.
      */
@@ -36,11 +34,6 @@ public interface PageIdsDumpStore {
      * @param partitions Partitions.
      */
     public void save(Iterable<Partition> partitions);
-
-    /**
-     * @param consumer Consumer.
-     */
-    public void forEach(FullPageIdConsumer consumer);
 
     /**
      * @param consumer Consumer.
@@ -96,76 +89,6 @@ public interface PageIdsDumpStore {
          */
         public int[] pageIndexes() {
             return pageIndexes;
-        }
-    }
-
-    /**
-     *
-     */
-    public static class Pages {
-        /** */
-        private final int cacheId;
-
-        /** */
-        private final Supplier<long[]> pageIdsSupplier;
-
-        /**
-         * @param cacheId Cache id.
-         * @param pageIdsSupplier Page IDs supplier.
-         */
-        public Pages(int cacheId, Supplier<long[]> pageIdsSupplier) {
-            this.cacheId = cacheId;
-            this.pageIdsSupplier = pageIdsSupplier;
-        }
-
-        /**
-         *
-         */
-        public int cacheId() {
-            return cacheId;
-        }
-
-        /**
-         *
-         */
-        public Supplier<long[]> pageIdsSupplier() {
-            return pageIdsSupplier;
-        }
-    }
-
-    /**
-     *
-     */
-    public static class Zone {
-        /** */
-        private final Iterable<Partition> partitions;
-
-        /** */
-        private final Iterable<Pages> pages;
-
-        /**
-         * @param partitions Partitions.
-         * @param pages Pages.
-         */
-        public Zone(
-            Iterable<Partition> partitions,
-            Iterable<Pages> pages) {
-            this.partitions = partitions;
-            this.pages = pages;
-        }
-
-        /**
-         *
-         */
-        public Iterable<Partition> partitions() {
-            return partitions;
-        }
-
-        /**
-         *
-         */
-        public Iterable<Pages> pages() {
-            return pages;
         }
     }
 }
