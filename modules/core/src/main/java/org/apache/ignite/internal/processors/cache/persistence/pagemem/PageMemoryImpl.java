@@ -353,11 +353,6 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /** {@inheritDoc} */
-    @Override public int getSegments() {
-        return segments.length;
-    }
-
-    /** {@inheritDoc} */
     @Override public void start() throws IgniteException {
         stopped = false;
 
@@ -1838,7 +1833,17 @@ public class PageMemoryImpl implements PageMemoryEx {
     }
 
     /**
+     * @param grpId Cache group ID.
      * @param pageId Page ID.
+     */
+    public int segmentIndex(int grpId, long pageId) {
+        return segmentIndex(grpId, pageId, segments.length);
+    }
+
+    /**
+     * @param grpId Cache group ID.
+     * @param pageId Page ID.
+     * @param segments Segments count.
      * @return Segment index.
      */
     public static int segmentIndex(int grpId, long pageId, int segments) {

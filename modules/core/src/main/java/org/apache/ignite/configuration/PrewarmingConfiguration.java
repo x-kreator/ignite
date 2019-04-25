@@ -33,9 +33,6 @@ public class PrewarmingConfiguration implements Serializable {
     /** Default hottest zone ratio. */
     public static final double DFLT_HOTTEST_ZONE_RATIO = 0.25;
 
-    /** Default heat time quantum. */
-    public static final int DFLT_HEAT_TIME_QUANTUM = 10;
-
     /**
      * Optimal count of threads for warm up pages loading into memory.
      * That value was obtained through testing warm up functionality on 28 cores with hyperThreading.
@@ -60,10 +57,7 @@ public class PrewarmingConfiguration implements Serializable {
     /** Hottest zone ratio. */
     private double hottestZoneRatio = DFLT_HOTTEST_ZONE_RATIO;
 
-    /** Heat time quantum. */
-    private int heatTimeQuantum = DFLT_HEAT_TIME_QUANTUM;
-
-    /** Count of threads which are used for warm up pages loading into memory. */
+    /** Count of threads which are used for loading pages into memory. */
     private int pageLoadThreads = Math.min(
         OPTIMAL_PAGE_LOAD_THREADS, Runtime.getRuntime().availableProcessors());
 
@@ -74,7 +68,7 @@ public class PrewarmingConfiguration implements Serializable {
     private Supplier<Map<String, Map<Integer, Supplier<int[]>>>> customPageIdsSupplier;
 
     /**
-     * If enabled, only index partitions will be tracked and warmed up.
+     * If enabled, only index partitions will be prewarmed.
      *
      * @return Prewarming of indexes only flag.
      */
@@ -139,14 +133,14 @@ public class PrewarmingConfiguration implements Serializable {
     }
 
     /**
-     * @return Dump percentage.
+     * @return Hottest zone ratio.
      */
     public double getHottestZoneRatio() {
         return hottestZoneRatio;
     }
 
     /**
-     * @param hottestZoneRatio New dump percentage.
+     * @param hottestZoneRatio New hottest zone ratio.
      * @return {@code this} for chaining.
      */
     public PrewarmingConfiguration setHottestZoneRatio(double hottestZoneRatio) {
@@ -156,39 +150,18 @@ public class PrewarmingConfiguration implements Serializable {
     }
 
     /**
-     * Gets heat time quantum in seconds.
+     * Specifies count of threads which are used for loading pages into memory.
      *
-     * @return Heat time quantum.
-     */
-    public int getHeatTimeQuantum() {
-        return heatTimeQuantum;
-    }
-
-    /**
-     * Sets heat time quantum in seconds. Must be greater or equal than 1.
-     *
-     * @param heatTimeQuantum New heat time quantum.
-     * @return {@code this} for chaining.
-     */
-    public PrewarmingConfiguration setHeatTimeQuantum(int heatTimeQuantum) {
-        this.heatTimeQuantum = heatTimeQuantum;
-
-        return this;
-    }
-
-    /**
-     * Specifies count of threads which are used for warm up pages loading into memory.
-     *
-     * @return Count of threads which are used for warm up pages loading into memory.
+     * @return Count of threads which are used for loading pages into memory.
      */
     public int getPageLoadThreads() {
         return pageLoadThreads;
     }
 
     /**
-     * Sets count of threads which will be used for warm up pages loading into memory.
+     * Sets count of threads which will be used for loading pages into memory.
      *
-     * @param pageLoadThreads Count of threads which will be used for warm up pages loading into memory.
+     * @param pageLoadThreads Count of threads which will be used for loading pages into memory.
      * Must be greater than 0.
      * @return {@code this} for chaining.
      */

@@ -133,7 +133,6 @@ import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStor
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListener;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.CheckpointMetricsTracker;
-import org.apache.ignite.internal.processors.cache.persistence.pagemem.LoadedPagesTracker;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryEx;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryImpl;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryPrewarming;
@@ -1094,8 +1093,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         PageMemoryPrewarming prewarming = null;
 
-        LastLoadedPagesIdsStore lastLoadedPagesIdsStore = null;
-
         PrewarmingConfiguration prewarmCfg = plcCfg.getPrewarmingConfiguration();
 
         if (prewarmCfg != null) {
@@ -1103,7 +1100,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 plcCfg.getName(),
                 prewarmCfg,
                 prewarmCfg.getCustomPageIdsSupplier() == null ?
-                    lastLoadedPagesIdsStore = new LastLoadedPagesIdsStore(plcCfg.getName(), prewarmCfg, cctx) :
+                    new LastLoadedPagesIdsStore(plcCfg.getName(), prewarmCfg, cctx) :
                     null,
                 memMetrics,
                 cctx);
@@ -1141,14 +1138,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         memMetrics.pageMemory(pageMem);
 
-        if (prewarming != null) {
+        if (prewarming != null)
             prewarming.pageMemory(pageMem);
-
-            if (lastLoadedPagesIdsStore != null)
-                pageMem.addLoadedPagesTracker(lastLoadedPagesIdsStore);
-            else if (prewarmCfg.getCustomPageIdsSupplier() instanceof LoadedPagesTracker)
-                pageMem.addLoadedPagesTracker((LoadedPagesTracker)prewarmCfg.getCustomPageIdsSupplier());
-        }
 
         return pageMem;
     }

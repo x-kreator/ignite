@@ -138,7 +138,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
 
         if (prewarmingEnabled && !prewarmingMultithreaded)
             dataRegionCfg.getPrewarmingConfiguration()
-                .setDumpReadThreads(1)
                 .setPageLoadThreads(1);
 
         if (!prewarmingEnabled)

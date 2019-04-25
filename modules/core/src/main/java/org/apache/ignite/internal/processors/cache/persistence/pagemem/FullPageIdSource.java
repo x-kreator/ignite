@@ -16,6 +16,8 @@
  */
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
+import java.util.function.BooleanSupplier;
+
 /**
  *
  */
@@ -23,6 +25,14 @@ package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 public interface FullPageIdSource {
     /**
      * @param consumer Consumer.
+     * @param breakCond Break condition.
      */
-    public void forEach(FullPageIdConsumer consumer);
+    public void forEach(FullPageIdConsumer consumer, BooleanSupplier breakCond);
+
+    /**
+     * @param consumer Consumer.
+     */
+    default void forEach(FullPageIdConsumer consumer) {
+        forEach(consumer, () -> false);
+    }
 }

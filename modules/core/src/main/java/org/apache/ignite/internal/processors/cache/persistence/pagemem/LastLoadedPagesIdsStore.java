@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongPredicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -68,9 +69,6 @@ public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource
     /** */
     private final IgniteLogger log;
 
-    /** */
-    private final ConcurrentMap<Long, Partition> segments = new ConcurrentHashMap<>();
-
     /** Dump worker. */
     private volatile DumpWorker dumpWorker;
 
@@ -84,7 +82,7 @@ public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource
     private volatile boolean stopping;
 
     /** Loaded pages dump in progress flag. */
-    private volatile boolean loadedPagesDumpInProgress;
+    private volatile boolean loadedPagesDumpInProgress; // FIXME
 
 
     /**
@@ -149,9 +147,9 @@ public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource
     }
 
     /** {@inheritDoc} */
-    @Override public void forEach(FullPageIdConsumer consumer) {
+    @Override public void forEach(FullPageIdConsumer consumer, BooleanSupplier breakCond) {
         // TODO check running
-        dumpStore.forEach(consumer);
+        dumpStore.forEach(consumer, breakCond);
     }
 
     /**
@@ -255,7 +253,8 @@ public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource
                         else {
                             Partition next = nextOpt.get();
 
-                            while (Partition.byCoolingAtCnt.compare(head, next) <= 0) {
+                            while (head.cnt + 1 < head.pageIdxTsArr.length &&
+                                Partition.byCoolingAtCnt.compare(head, next) <= 0) {
                                 head.incCount();
 
                                 if (--pageIdsLeft == 0)
@@ -295,17 +294,9 @@ public class LastLoadedPagesIdsStore implements LifecycleAware, FullPageIdSource
     }
 
     /**
-     * @param key Partition key.
-     */
-    private Partition getPart(long key) {
-        return segments.computeIfAbsent(key, Partition::new);
-    }
-
-    /**
      *
      */
     private static class Partition {
-
         /** Group ID key mask. */
         private static final long GRP_ID_MASK = ~(-1L << 32);
 

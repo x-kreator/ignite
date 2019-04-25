@@ -16,6 +16,8 @@
  */
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
+import java.util.function.BooleanSupplier;
+
 /**
  *
  */
@@ -36,10 +38,11 @@ public interface PageIdsDumpStore extends FullPageIdSource {
     public void save(Iterable<Partition> partitions);
 
     /**
-     * @param consumer Consumer.
      * @param dumpId Dump ID.
+     * @param consumer Consumer.
+     * @param breakCond Break condition.
      */
-    public void forEach(FullPageIdConsumer consumer, String dumpId);
+    public void forEach(String dumpId, FullPageIdConsumer consumer, BooleanSupplier breakCond);
 
     /**
      *

@@ -169,11 +169,4 @@ public interface PageMemoryEx extends PageMemory {
      * Starts page memory prewarming process.
      */
     public void startPrewarming();
-
-    /**
-     *  Specifies count of segments.
-     *
-     * @return Count of segments.
-     */
-    public int getSegments();
 }

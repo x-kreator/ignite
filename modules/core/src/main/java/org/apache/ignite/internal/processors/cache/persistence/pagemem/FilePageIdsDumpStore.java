@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
@@ -273,7 +274,7 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
     }
 
     /** {@inheritDoc} */
-    @Override public void forEach(FullPageIdConsumer consumer) {
+    @Override public void forEach(FullPageIdConsumer consumer, BooleanSupplier breakCond) {
         File[] dumpFiles = dumpDir.listFiles(FILE_FILTER);
 
         if (dumpFiles == null || dumpFiles.length == 0) {
@@ -288,23 +289,26 @@ public class FilePageIdsDumpStore implements PageIdsDumpStore {
 
         File latestDumpFile = Collections.max(Arrays.asList(dumpFiles), Comparator.comparing(File::getName));
 
-        forEach(consumer, latestDumpFile);
+        forEach(latestDumpFile, consumer, breakCond);
     }
 
     /** {@inheritDoc} */
-    @Override public void forEach(FullPageIdConsumer consumer, String dumpId) {
-        forEach(consumer, new File(dumpDir, dumpId + DUMP_FILE_SUFFIX));
+    @Override public void forEach(String dumpId, FullPageIdConsumer consumer, BooleanSupplier breakCond) {
+        forEach(new File(dumpDir, dumpId + DUMP_FILE_SUFFIX), consumer, breakCond);
     }
 
     /**
      * @param consumer Consumer.
      * @param dumpFile Dump file.
      */
-    private void forEach(FullPageIdConsumer consumer, File dumpFile) {
+    private void forEach(File dumpFile, FullPageIdConsumer consumer, BooleanSupplier breakCond) {
         try (DumpContext dumpCtx = new DumpContext(dumpFile)) {
             String errorMsg = "Corrupted dump file [name" + dumpFile.getName() + "]";
 
             do {
+                if (breakCond != null && breakCond.getAsBoolean())
+                    break;
+
                 if (dumpCtx.availableBytes() < 10)
                     throw new IOException(errorMsg);
 

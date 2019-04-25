@@ -22,8 +22,8 @@ package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 @FunctionalInterface
 public interface FullPageIdConsumer {
     /**
-     * @param cacheId Cache ID.
+     * @param grpId Cache group ID.
      * @param pageId Page ID.
      */
-    public void accept(int cacheId, long pageId);
+    public void accept(int grpId, long pageId);
 }
