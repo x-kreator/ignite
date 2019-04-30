@@ -18,15 +18,18 @@
 package org.apache.ignite.internal.processors.cache.persistence.pagemem;
 
 import java.io.File;
-import java.nio.file.StandardOpenOption;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.OpenOption;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.ignite.IgniteCache;
-import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.configuration.DataRegionConfiguration;
 import org.apache.ignite.configuration.DataStorageConfiguration;
@@ -35,7 +38,8 @@ import org.apache.ignite.configuration.PrewarmingConfiguration;
 import org.apache.ignite.configuration.WALMode;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
-import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIODecorator;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.ListeningTestLogger;
@@ -56,9 +60,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
     /** */
     protected int maxMemorySize = 128 * 1024 * 1024;
 
-    /** */
-    protected int tmpFileMBytes = 2 * 1024;
-
     /** Size of int[] array values, x4 in bytes. */
     protected int valSize = 1024 * 1024;
 
@@ -70,6 +71,9 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
 
     /** Warming up runtime dump delay. */
     protected long prewarmingRuntimeDumpDelay = 30_000;
+
+    /** Slowdown cached disk IO operations. */
+    private volatile boolean slowdownCachedDiskIO = true;
 
     /** Ignite. */
     private volatile IgniteEx ignite;
@@ -92,6 +96,8 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
                     .setPageLoadThreads(1))
             );
 
+        memCfg.setFileIOFactory(new SlowdownFileIOFactory(memCfg.getFileIOFactory()));
+
         cfg.setDataStorageConfiguration(memCfg);
 
         return cfg;
@@ -109,8 +115,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
         stopAllGrids(false);
 
         cleanPersistenceDir();
-
-        U.delete(tmpDir());
 
         super.afterTest();
     }
@@ -146,8 +150,6 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
         long totalReadingDuration = 0;
 
         try (IgniteEx ignite = startGrid(cfg)) {
-            pushOutDiskCache();
-
             IgniteCache<Integer, int[]> cache = ignite.getOrCreateCache(CACHE_NAME);
 
             for (int i = valCnt; i >= 0; i--) {
@@ -399,38 +401,108 @@ public class PageMemoryPrewarmingTest extends GridCommonAbstractTest {
     /**
      *
      */
-    private void pushOutDiskCache() throws Exception {
-        File tmp = new File(tmpDir(), "dummy.tmp");
+    private static class SlowdownFileIOFactory implements FileIOFactory {
+        /** Serial version uid. */
+        private static final long serialVersionUID = 0L;
 
-        byte[] buf = new byte[1024 * 1024]; // 1MiB
+        /** Delegate factory. */
+        private final FileIOFactory delegate;
 
-        Arrays.fill(buf, (byte)0xFF);
+        /** Bytes per second disk speed. */
+        private volatile long bpsDiskSpeed = 200_000_000L;
 
-        try (FileIO io = new RandomAccessFileIO(tmp,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.TRUNCATE_EXISTING)){
-
-            for (int i = 0; i < tmpFileMBytes; i++) {
-                io.write(buf, 0, buf.length);
-                io.force();
-            }
-
-            U.warn(log, "Temp file written: " + tmp.getAbsolutePath() + ", size: " + io.size());
+        /**
+         * @param delegate Delegate factory.
+         */
+        SlowdownFileIOFactory(FileIOFactory delegate) {
+            this.delegate = delegate;
         }
 
-        try (FileIO io = new RandomAccessFileIO(tmp, StandardOpenOption.READ)) {
-            for (int i = 0; i < tmpFileMBytes; i++)
-                io.read(buf, 0, buf.length);
+        /**
+         * @param startNanos Start nanos.
+         * @param bytes Bytes count.
+         */
+        private void slowdownDiskIO(long startNanos, int bytes) {
+            long slowdown = 1_000_000_000L / (bpsDiskSpeed / bytes) - (System.nanoTime() - startNanos);
 
-            U.warn(log, "Temp file read: " + tmp.getAbsolutePath() + ", size: " + io.size());
+            if (slowdown > 0)
+                LockSupport.parkNanos(slowdown);
+        }
+
+        /** {@inheritDoc} */
+        @Override public FileIO create(File file, OpenOption... modes) throws IOException {
+            return new FileIODecorator(delegate.create(file, modes)) {
+                /** {@inheritDoc} */
+                @Override public int read(ByteBuffer destBuf) throws IOException {
+                    long startNanos = System.nanoTime();
+
+                    int bytesRead = super.read(destBuf);
+
+                    slowdownDiskIO(startNanos, bytesRead);
+
+                    return bytesRead;
+                }
+
+                /** {@inheritDoc} */
+                @Override public int read(ByteBuffer destBuf, long position) throws IOException {
+                    long startNanos = System.nanoTime();
+
+                    int bytesRead = super.read(destBuf, position);
+
+                    slowdownDiskIO(startNanos, bytesRead);
+
+                    return bytesRead;
+                }
+
+                /** {@inheritDoc} */
+                @Override public int read(byte[] buf, int off, int len) throws IOException {
+                    long startNanos = System.nanoTime();
+
+                    int bytesRead = super.read(buf, off, len);
+
+                    slowdownDiskIO(startNanos, bytesRead);
+
+                    return bytesRead;
+                }
+
+                // TODO FilePageStore uses FileIO#readFully(ByteBuffer, long) for page reads,
+                // TODO so maybe better to override it only instead three methods above.
+            };
         }
     }
 
     /**
-     * @return Temporary directory.
+     *
      */
-    private File tmpDir() throws IgniteCheckedException {
-        return U.resolveWorkDirectory(U.defaultWorkDirectory(), "tmp", false);
+    private static class Tracer {
+        /** */
+        AtomicInteger cntr = new AtomicInteger();
+
+        /** */
+        AtomicLong ts = new AtomicLong(U.currentTimeMillis());
+
+        /**
+         *
+         */
+        void trace() {
+            trace(null);
+        }
+
+        /**
+         *
+         */
+        void trace(String actId) {
+            int actNo = cntr.incrementAndGet();
+
+            long currTs = U.currentTimeMillis();
+
+            long prevTs = ts.get();
+
+            if (log.isInfoEnabled())
+                log.info("#" + actNo + (actId != null ? " [" + actId + "]" : "") + " time: " + (currTs - prevTs) + " ms.");
+
+            while (!ts.compareAndSet(prevTs, currTs))
+                prevTs = ts.get();
+        }
     }
 }
