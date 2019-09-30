@@ -41,6 +41,18 @@ public class GridLoggerInjectionSelfTest extends GridCommonAbstractTest implemen
         startGrids(2);
     }
 
+    /** {@inheritDoc} */
+    @Override protected void afterTestsStopped() throws Exception {
+        stopAllGrids();
+
+        super.afterTestsStopped();
+    }
+
+    @Test
+    public void testNoop() {
+        System.out.println(">>> test started");
+    }
+
     /**
      * Test that closure gets right log category injected on all nodes using field injection.
      *

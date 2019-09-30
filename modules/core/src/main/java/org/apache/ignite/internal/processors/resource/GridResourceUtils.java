@@ -22,7 +22,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lang.IgniteClosure;
+import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 
 /**
  * Collection of utility methods used in package for classes reflection.
@@ -54,6 +56,17 @@ final class GridResourceUtils {
             field.setAccessible(true);
 
             field.set(target, rsrc);
+
+            if (target instanceof TcpCommunicationSpi/*st.length > 2 && st[2].getClassName().equals(GridResourceLoggerInjector.class.getName())*/) {
+                System.out.println(">>> field: " + field.getName() +
+                    ", target: " + target.getClass().getName() + "@" + U.hexInt(target.hashCode()) +
+                    ", value: " + rsrc);
+
+                StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                for (StackTraceElement e : st)
+                    System.out.println("  * " + e);
+
+            }
         }
         catch (SecurityException | ExceptionInInitializerError | IllegalAccessException e) {
             throw new IgniteCheckedException("Failed to inject resource [field=" + field.getName() +
