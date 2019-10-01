@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.internal.IgniteKernal;
 import org.apache.ignite.internal.managers.deployment.GridDeployment;
 import org.apache.ignite.internal.util.GridLeanIdentitySet;
 import org.apache.ignite.internal.util.IgniteUtils;
@@ -47,6 +48,7 @@ import org.apache.ignite.resources.SpringApplicationContextResource;
 import org.apache.ignite.resources.SpringResource;
 import org.apache.ignite.resources.TaskContinuousMapperResource;
 import org.apache.ignite.resources.TaskSessionResource;
+import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 import org.jetbrains.annotations.Nullable;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -435,6 +437,19 @@ public class GridResourceIoc {
             }
 
             if (annotatedMembers != null) {
+                if (target instanceof TcpCommunicationSpi && injector instanceof GridResourceLoggerInjector) {
+                    System.out.println("@@@ Injecting target: " + target.getClass().getName() + "@" + U.hexInt(target.hashCode()) +
+                        ", injector: " + injector.getClass().getName() + "@" + U.hexInt(injector.hashCode()));
+                    StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                    for (int i = 1; i < st.length; i++) {
+                        System.out.println("  *[" + i + "] " + st[i]);
+                        if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                            ("start".equals(st[i].getMethodName()) ||
+                                "stop".equals(st[i].getMethodName())))
+                            break;
+                    }
+                }
+
                 for (GridResourceField field : annotatedMembers.get1()) {
                     injector.inject(field, target, depCls, dep);
 

@@ -22,6 +22,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.internal.IgniteKernal;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lang.IgniteClosure;
 import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
@@ -63,9 +64,13 @@ final class GridResourceUtils {
                     ", value: " + rsrc);
 
                 StackTraceElement[] st = Thread.currentThread().getStackTrace();
-                for (StackTraceElement e : st)
-                    System.out.println("  * " + e);
-
+                for (int i = 1; i < st.length; i++) {
+                    System.out.println("  *[" + i + "] " + st[i]);
+                    if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                        ("start".equals(st[i].getMethodName()) ||
+                            "stop".equals(st[i].getMethodName())))
+                        break;
+                }
             }
         }
         catch (SecurityException | ExceptionInInitializerError | IllegalAccessException e) {

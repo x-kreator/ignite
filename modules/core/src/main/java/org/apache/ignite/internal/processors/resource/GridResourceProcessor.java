@@ -20,6 +20,7 @@ package org.apache.ignite.internal.processors.resource;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteFileSystem;
 import org.apache.ignite.cache.store.CacheStoreSession;
@@ -38,8 +39,10 @@ import org.apache.ignite.internal.processors.GridProcessorAdapter;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.lifecycle.LifecycleBean;
+import org.apache.ignite.resources.LoggerResource;
 import org.apache.ignite.services.Service;
 import org.apache.ignite.spi.IgniteSpi;
+import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -273,6 +276,10 @@ public class GridResourceProcessor extends GridProcessorAdapter {
         for (GridResourceIoc.ResourceAnnotation ann : annSet.annotations) {
             if (clsDesc.isAnnotated(ann)) {
                 final GridResourceInjector injector = injectorByAnnotation(ann, i < params.length ? params[i] : null);
+
+                if (obj instanceof TcpCommunicationSpi && ann == GridResourceIoc.ResourceAnnotation.LOGGER)
+                    System.out.println("!!! clsDesc.annotatedMembers[LOGGER].var1: " +
+                        Arrays.toString(clsDesc.annotatedMembers(LoggerResource.class).get1()));
 
                 if (injector != null)
                     clsDesc.inject(obj, ann, injector, dep, depCls);

@@ -35,6 +35,7 @@ import org.apache.ignite.events.Event;
 import org.apache.ignite.internal.GridComponent;
 import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.IgniteInternalFuture;
+import org.apache.ignite.internal.IgniteKernal;
 import org.apache.ignite.internal.managers.communication.GridMessageListener;
 import org.apache.ignite.internal.managers.eventstorage.GridLocalEventListener;
 import org.apache.ignite.internal.processors.timeout.GridSpiTimeoutObject;
@@ -59,6 +60,7 @@ import org.apache.ignite.spi.IgniteSpiContext;
 import org.apache.ignite.spi.IgniteSpiException;
 import org.apache.ignite.spi.IgniteSpiNoop;
 import org.apache.ignite.spi.IgniteSpiTimeoutObject;
+import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag.GridDiscoveryData;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag.JoiningNodeDiscoveryData;
@@ -107,6 +109,19 @@ public abstract class GridManagerAdapter<T extends IgniteSpi> implements GridMan
 
         this.ctx = ctx;
         this.spis = spis;
+
+        if (spis[0] instanceof TcpCommunicationSpi) {
+            System.out.println("### ctx[name=" + ctx.igniteInstanceName() + "]: " + ctx.getClass().getName() + "@" + U.hexInt(ctx.hashCode()));
+            System.out.println("### spi: " + spis[0].getClass().getName() + "@" + U.hexInt(spis[0].hashCode()));
+            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            for (int i = 1; i < st.length; i++) {
+                System.out.println("  *[" + i + "] " + st[i]);
+                if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                    ("start".equals(st[i].getMethodName()) ||
+                        "stop".equals(st[i].getMethodName())))
+                    break;
+            }
+        }
 
         boolean enabled = false;
 
@@ -250,6 +265,18 @@ public abstract class GridManagerAdapter<T extends IgniteSpi> implements GridMan
             assert res == null;
 
             if (!injected) {
+                if (spi instanceof TcpCommunicationSpi) {
+                    System.out.println("@@@ Injecting spi: " + spi.getClass().getName() + "@" + U.hexInt(spi.hashCode()));
+                    StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                    for (int i = 1; i < st.length; i++) {
+                        System.out.println("  *[" + i + "] " + st[i]);
+                        if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                            ("start".equals(st[i].getMethodName()) ||
+                                "stop".equals(st[i].getMethodName())))
+                            break;
+                    }
+                }
+
                 // Inject all spi resources.
                 ctx.resource().inject(spi);
 
