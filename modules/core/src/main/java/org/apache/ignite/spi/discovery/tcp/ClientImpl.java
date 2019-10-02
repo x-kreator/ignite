@@ -67,6 +67,7 @@ import org.apache.ignite.internal.IgniteClientDisconnectedCheckedException;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.IgniteFeatures;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
+import org.apache.ignite.internal.IgniteKernal;
 import org.apache.ignite.internal.IgniteNodeAttributes;
 import org.apache.ignite.internal.managers.discovery.CustomMessageWrapper;
 import org.apache.ignite.internal.managers.discovery.DiscoveryServerOnlyCustomMessage;
@@ -1520,6 +1521,7 @@ class ClientImpl extends TcpDiscoveryImpl {
 
             try {
                 while (true) {
+                    // FIXME here...
                     T2<SocketStream, Boolean> joinRes = joinTopology(prevAddr, timeout, null, null);
 
                     if (joinRes == null) {
@@ -1637,6 +1639,16 @@ class ClientImpl extends TcpDiscoveryImpl {
                             "to reconnect.", err));
                     else
                         msgWorker.addMessage(SPI_RECONNECT_FAILED);
+                }
+
+                System.out.println("~~~ stopping " + getClass().getName() + "...");
+                StackTraceElement[] st = Thread.currentThread().getStackTrace();
+                for (int i = 1; i < st.length; i++) {
+                    System.out.println("  *[" + i + "] " + st[i]);
+                    if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                        ("start".equals(st[i].getMethodName()) ||
+                            "stop".equals(st[i].getMethodName())))
+                        break;
                 }
             }
         }

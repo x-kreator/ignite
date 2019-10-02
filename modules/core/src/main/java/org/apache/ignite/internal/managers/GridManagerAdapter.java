@@ -64,6 +64,7 @@ import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag.GridDiscoveryData;
 import org.apache.ignite.spi.discovery.DiscoveryDataBag.JoiningNodeDiscoveryData;
+import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
 import org.jetbrains.annotations.Nullable;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -110,7 +111,7 @@ public abstract class GridManagerAdapter<T extends IgniteSpi> implements GridMan
         this.ctx = ctx;
         this.spis = spis;
 
-        if (spis[0] instanceof TcpCommunicationSpi) {
+        if (spis[0] instanceof TcpCommunicationSpi || spis[0] instanceof TcpDiscoveryIpFinder) {
             System.out.println("### ctx[name=" + ctx.igniteInstanceName() + "]: " + ctx.getClass().getName() + "@" + U.hexInt(ctx.hashCode()));
             System.out.println("### spi: " + spis[0].getClass().getName() + "@" + U.hexInt(spis[0].hashCode()));
             StackTraceElement[] st = Thread.currentThread().getStackTrace();

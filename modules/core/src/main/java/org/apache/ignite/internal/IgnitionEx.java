@@ -2721,6 +2721,16 @@ public class IgnitionEx {
 
             rebalanceStripedExecSvc = null;
 
+            System.out.println("~~~ stopping stripedExecSvc...");
+            StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            for (int i = 1; i < st.length; i++) {
+                System.out.println("  *[" + i + "] " + st[i]);
+                if (st[i].getClassName().equals(IgniteKernal.class.getName()) &&
+                    ("start".equals(st[i].getMethodName()) ||
+                        "stop".equals(st[i].getMethodName())))
+                    break;
+            }
+
             U.shutdownNow(getClass(), stripedExecSvc, log);
 
             stripedExecSvc = null;
