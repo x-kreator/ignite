@@ -17,7 +17,10 @@
 
 package hang;
 
+import java.util.Collections;
 import java.util.LinkedList;
+import java.util.Random;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteSystemProperties;
@@ -25,6 +28,7 @@ import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.MvccFeatureChecker;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.junit.Test;
@@ -76,6 +80,11 @@ public class StressTest3 extends GridCommonAbstractTest {
 /*
         cfg.setIgniteInstanceName(IGNITE_NAME_PREFIX + id0 + (client ? "_client" : "_server"));
  */
+        TcpDiscoveryVmIpFinder ipFinder = new TcpDiscoveryVmIpFinder();
+        ipFinder.setAddresses(Collections.singletonList("localhost:47500..47600"));
+
+        //cfg.setDiscoverySpi(new TcpDiscoverySpi().setIpFinder(ipFinder));
+
         return cfg;
     }
 
@@ -89,13 +98,17 @@ public class StressTest3 extends GridCommonAbstractTest {
         for (int i = 0; i < 4; i++)
             ignites.add(startGrid(gridIdxSeq.getAndIncrement()));
 
-        new Thread(new ServerNodesRestartTask(ignites)).start();
+        CyclicBarrier barrier = new CyclicBarrier(2);
+
+        new Thread(new ServerNodesRestartTask(ignites, barrier)).start();
 
         client.set(true);
 
         //doSleep(5000);
         while (true) {
             IgniteEx client = startGrid(gridIdxSeq.getAndIncrement());
+
+            barrier.await();
 
             client.close();
         }
@@ -125,13 +138,18 @@ public class StressTest3 extends GridCommonAbstractTest {
      */
     class ServerNodesRestartTask implements Runnable {
         /** */
-        private LinkedList<IgniteEx> ignites;
+        private final LinkedList<IgniteEx> ignites;
+        /** */
+        private final CyclicBarrier barrier;
+        /** */
+        private final Random rnd = new Random();
 
         /**
          * @param ignites Ignites.
          */
-        ServerNodesRestartTask(LinkedList<IgniteEx> ignites) {
+        ServerNodesRestartTask(LinkedList<IgniteEx> ignites, CyclicBarrier barrier) {
             this.ignites = ignites;
+            this.barrier = barrier;
         }
 
         /** {@inheritDoc} */
@@ -139,13 +157,19 @@ public class StressTest3 extends GridCommonAbstractTest {
             int gridIdx;
 
             while (true) {
-                Ignite ignite = ignites.remove();
-                //sleep(2_000);
-                ignite.close();
+                gridIdx = rnd.nextInt(4);
 
-                gridIdx = gridIdxSeq.getAndIncrement();
+                Ignite ignite = ignites.remove(gridIdx);
+
+                // gridIdx = gridIdxSeq.getAndIncrement();
+
+                // doSleep(1_000);
 
                 try {
+                    barrier.await();
+
+                    ignite.close();
+
                     ignites.add(startGrid(gridIdx));
                 }
                 catch (Exception e) {
