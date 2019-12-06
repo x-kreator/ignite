@@ -18,17 +18,18 @@
 package hang;
 
 import java.util.Collections;
-import java.util.LinkedList;
 import java.util.Random;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
+import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
 import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.MvccFeatureChecker;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.junit.Test;
@@ -61,6 +62,11 @@ public class StressTest3 extends GridCommonAbstractTest {
     }
 
     /** {@inheritDoc} */
+    @Override protected long getTestTimeout() {
+        return 2_000_000_000;
+    }
+
+    /** {@inheritDoc} */
     @Override protected void afterTest() throws Exception {
         super.afterTest();
 
@@ -81,9 +87,9 @@ public class StressTest3 extends GridCommonAbstractTest {
         cfg.setIgniteInstanceName(IGNITE_NAME_PREFIX + id0 + (client ? "_client" : "_server"));
  */
         TcpDiscoveryVmIpFinder ipFinder = new TcpDiscoveryVmIpFinder();
-        ipFinder.setAddresses(Collections.singletonList("localhost:47500..47600"));
+        ipFinder.setAddresses(Collections.singletonList("127.0.0.1:47500..47509"));
 
-        //cfg.setDiscoverySpi(new TcpDiscoverySpi().setIpFinder(ipFinder));
+        cfg.setDiscoverySpi(new TcpDiscoverySpi().setIpFinder(ipFinder));
 
         return cfg;
     }
@@ -93,20 +99,19 @@ public class StressTest3 extends GridCommonAbstractTest {
      */
     @Test
     public void testConcurrentClientAndServerNodesRestart() throws Exception {
-        LinkedList<IgniteEx> ignites = new LinkedList<>();
+        IgniteEx[] ignites = new IgniteEx[4];
 
-        for (int i = 0; i < 4; i++)
-            ignites.add(startGrid(gridIdxSeq.getAndIncrement()));
+        for (int i = 0; i < ignites.length; i++)
+            ignites[i] = startGrid(i);
 
         CyclicBarrier barrier = new CyclicBarrier(2);
 
-        new Thread(new ServerNodesRestartTask(ignites, barrier)).start();
+        IgniteInternalFuture<?> fut = GridTestUtils.runAsync(new ServerNodesRestartTask(ignites, barrier), "restart-servers");
 
         client.set(true);
 
-        //doSleep(5000);
-        while (true) {
-            IgniteEx client = startGrid(gridIdxSeq.getAndIncrement());
+        while (!fut.isDone()) {
+            IgniteEx client = startGrid(ignites.length);
 
             barrier.await();
 
@@ -138,7 +143,7 @@ public class StressTest3 extends GridCommonAbstractTest {
      */
     class ServerNodesRestartTask implements Runnable {
         /** */
-        private final LinkedList<IgniteEx> ignites;
+        private final IgniteEx[] ignites;
         /** */
         private final CyclicBarrier barrier;
         /** */
@@ -147,7 +152,7 @@ public class StressTest3 extends GridCommonAbstractTest {
         /**
          * @param ignites Ignites.
          */
-        ServerNodesRestartTask(LinkedList<IgniteEx> ignites, CyclicBarrier barrier) {
+        ServerNodesRestartTask(IgniteEx[] ignites, CyclicBarrier barrier) {
             this.ignites = ignites;
             this.barrier = barrier;
         }
@@ -159,18 +164,12 @@ public class StressTest3 extends GridCommonAbstractTest {
             while (true) {
                 gridIdx = rnd.nextInt(4);
 
-                Ignite ignite = ignites.remove(gridIdx);
-
-                // gridIdx = gridIdxSeq.getAndIncrement();
-
-                // doSleep(1_000);
-
                 try {
                     barrier.await();
 
-                    ignite.close();
+                    ignites[gridIdx].close();
 
-                    ignites.add(startGrid(gridIdx));
+                    ignites[gridIdx] = startGrid(gridIdx);
                 }
                 catch (Exception e) {
                     U.error(log, "Ignite #" + gridIdx + " start failed", e);
