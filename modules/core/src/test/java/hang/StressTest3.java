@@ -19,7 +19,10 @@ package hang;
 
 import java.util.Collections;
 import java.util.Random;
+import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -111,12 +114,15 @@ public class StressTest3 extends GridCommonAbstractTest {
         client.set(true);
 
         while (!fut.isDone()) {
+            System.out.println(">>> Starting new client...");
             IgniteEx client = startGrid(ignites.length);
 
             barrier.await();
 
             client.close();
         }
+
+        fut.get();
     }
 
     /**
@@ -172,10 +178,20 @@ public class StressTest3 extends GridCommonAbstractTest {
                     ignites[gridIdx] = startGrid(gridIdx);
                 }
                 catch (Exception e) {
-                    U.error(log, "Ignite #" + gridIdx + " start failed", e);
-                    break;
+                    U.error(log, "" + gridIdx + " start failed", e);
+
+                    throw new RuntimeException(e);
                 }
+
+                if (gridIdx == 0)
+                    break;
             }
+
+            barrier.reset();
+
+            System.out.println(">>> Servers restarting routine is stopped.");
+
+            throw new RuntimeException("Servers restarting routine is stopped");
         }
     }
 }
