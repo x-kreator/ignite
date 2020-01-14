@@ -646,6 +646,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     private static final CallTracker RENT_TRACKER = CallTracker.named("GDLP-rent");
 
     /** */
+    @GridToStringExclude
     private volatile CallTracker.Track rentTrack;
 
     /**

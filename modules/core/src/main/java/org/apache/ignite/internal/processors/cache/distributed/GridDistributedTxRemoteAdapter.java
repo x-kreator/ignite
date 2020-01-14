@@ -521,6 +521,7 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
 
                     // Reserved partitions (necessary to prevent race due to updates in RENTING state).
                     Set<GridDhtLocalPartition> reservedParts = new HashSet<>();
+                    Set<GridDhtLocalPartition> rentedParts = new HashSet<>();
 
                     try {
                         assert !txState.mvccEnabled() || mvccSnapshot != null : "Mvcc is not initialized: " + this;
@@ -545,9 +546,14 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                     continue;
 
                                 if (!reservedParts.contains(locPart) && locPart.reserve()) {
-                                    assert locPart.state() != EVICTED && locPart.reservations() > 0 : locPart;
+                                    GridDhtPartitionState state = locPart.state();
+
+                                    assert state != EVICTED && locPart.reservations() > 0 : locPart;
 
                                     reservedParts.add(locPart);
+
+                                    if (state == RENTING)
+                                        rentedParts.add(locPart);
                                 }
 
                                 GridDhtPartitionState state = locPart.state();
@@ -555,9 +561,6 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                 if (state == RENTING || state == EVICTED) {
                                     LT.warn(log(), "Skipping update to partition that is concurrently evicting " +
                                         "[grp=" + cacheCtx.group().cacheOrGroupName() + ", part=" + locPart + "]");
-
-                                    if (state == RENTING)
-                                        LT.warn(log(), "part [id=" + locPart.id() + "] rented at\n" + locPart.rentTrack());
 
                                     continue;
                                 }
@@ -859,7 +862,7 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
 
                             locPart.release();
 
-                            if (rentTrack != null)
+                            if (!rentedParts.contains(locPart) && rentTrack != null)
                                 U.warn(log, "part [id=" + locPart.id() + "] was rented while being reserved at\n" + rentTrack);
                         }
 
