@@ -20,9 +20,7 @@ package hang;
 import java.util.Collections;
 import java.util.Random;
 import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CyclicBarrier;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -107,22 +105,28 @@ public class StressTest3 extends GridCommonAbstractTest {
         for (int i = 0; i < ignites.length; i++)
             ignites[i] = startGrid(i);
 
-        CyclicBarrier barrier = new CyclicBarrier(2);
+        //CyclicBarrier barrier = new CyclicBarrier(2);
+        Phaser phaser = new Phaser(2);
 
-        IgniteInternalFuture<?> fut = GridTestUtils.runAsync(new ServerNodesRestartTask(ignites, barrier), "restart-servers");
+        IgniteInternalFuture<?> fut = GridTestUtils.runAsync(new ServerNodesRestartTask(ignites, phaser), "restart-servers");
 
         client.set(true);
 
         while (!fut.isDone()) {
             System.out.println(">>> Starting new client...");
-            IgniteEx client = startGrid(ignites.length);
 
-            barrier.await();
-
-            client.close();
+            try (IgniteEx client = startGrid(ignites.length)) {
+                log.info("r/a #1.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                phaser.arriveAndAwaitAdvance();
+                log.info("r/a #1.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+            }
+            catch (BrokenBarrierException ignored) {
+                break;
+            }
         }
 
-        fut.get();
+        U.error(log, "Error:", fut.error());
+        //fut.get();
     }
 
     /**
@@ -151,16 +155,16 @@ public class StressTest3 extends GridCommonAbstractTest {
         /** */
         private final IgniteEx[] ignites;
         /** */
-        private final CyclicBarrier barrier;
+        private final Phaser phaser;
         /** */
         private final Random rnd = new Random();
 
         /**
          * @param ignites Ignites.
          */
-        ServerNodesRestartTask(IgniteEx[] ignites, CyclicBarrier barrier) {
+        ServerNodesRestartTask(IgniteEx[] ignites, Phaser phaser) {
             this.ignites = ignites;
-            this.barrier = barrier;
+            this.phaser = phaser;
         }
 
         /** {@inheritDoc} */
@@ -171,7 +175,9 @@ public class StressTest3 extends GridCommonAbstractTest {
                 gridIdx = rnd.nextInt(4);
 
                 try {
-                    barrier.await();
+                    log.info("r/a #2.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                    phaser.arriveAndAwaitAdvance();
+                    log.info("r/a #2.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
 
                     ignites[gridIdx].close();
 
@@ -187,7 +193,7 @@ public class StressTest3 extends GridCommonAbstractTest {
                     break;
             }
 
-            barrier.reset();
+            phaser.arriveAndDeregister();
 
             System.out.println(">>> Servers restarting routine is stopped.");
 
