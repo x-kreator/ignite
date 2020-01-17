@@ -186,18 +186,20 @@ public class StressTest3 extends GridCommonAbstractTest {
                 catch (Exception e) {
                     U.error(log, "" + gridIdx + " start failed", e);
 
+                    phaser.arriveAndDeregister();
+
                     throw new RuntimeException(e);
                 }
 
-                if (gridIdx == 0)
-                    break;
+                /*if (gridIdx == 0)
+                    break;*/
             }
 
-            phaser.arriveAndDeregister();
+            /*phaser.arriveAndDeregister();
 
             System.out.println(">>> Servers restarting routine is stopped.");
 
-            throw new RuntimeException("Servers restarting routine is stopped");
+            throw new RuntimeException("Servers restarting routine is stopped");*/
         }
     }
 }
