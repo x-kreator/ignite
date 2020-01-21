@@ -17,8 +17,10 @@
 
 package org.apache.ignite.internal.util;
 
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -127,6 +129,8 @@ public class CallTracker {
         private final String threadName;
         /** */
         private final String trace;
+        /** */
+        private final long ts = System.currentTimeMillis();
 
         /**
          * @param threadName Thread name.
@@ -139,9 +143,10 @@ public class CallTracker {
 
         /** {@inheritDoc} */
         @Override public String toString() {
-            return threadName + NL + trace;
+            return threadName + NL + new SimpleDateFormat("  [yyyy-MM-dd HH:mm:ss,SSS]").format(new Date(ts)) + NL + trace;
         }
     }
+
     /**
      *
      */
