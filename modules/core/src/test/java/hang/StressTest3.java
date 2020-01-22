@@ -22,6 +22,7 @@ import java.util.Random;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
@@ -105,7 +106,6 @@ public class StressTest3 extends GridCommonAbstractTest {
         for (int i = 0; i < ignites.length; i++)
             ignites[i] = startGrid(i);
 
-        //CyclicBarrier barrier = new CyclicBarrier(2);
         Phaser phaser = new Phaser(2);
 
         IgniteInternalFuture<?> fut = GridTestUtils.runAsync(new ServerNodesRestartTask(ignites, phaser), "restart-servers");
@@ -116,9 +116,14 @@ public class StressTest3 extends GridCommonAbstractTest {
             System.out.println(">>> Starting new client...");
 
             try (IgniteEx client = startGrid(ignites.length)) {
-                log.info("r/a #1.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                final IgniteCache<Integer, Integer> cache = client.cache(DEFAULT_CACHE_NAME);
+
+                // log.info("r/a #1.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
                 phaser.arriveAndAwaitAdvance();
-                log.info("r/a #1.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                // log.info("r/a #1.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+
+                for (int i = 0; i < 1000; i++)
+                    cache.put(i, i);
             }
             catch (BrokenBarrierException ignored) {
                 break;
@@ -175,9 +180,9 @@ public class StressTest3 extends GridCommonAbstractTest {
                 gridIdx = rnd.nextInt(4);
 
                 try {
-                    log.info("r/a #2.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                    // log.info("r/a #2.1: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
                     phaser.arriveAndAwaitAdvance();
-                    log.info("r/a #2.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
+                    // log.info("r/a #2.2: " + phaser.getRegisteredParties() + "/" + phaser.getArrivedParties());
 
                     ignites[gridIdx].close();
 
