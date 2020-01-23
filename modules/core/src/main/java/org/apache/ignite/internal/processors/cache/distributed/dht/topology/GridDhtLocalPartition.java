@@ -454,8 +454,11 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             long newState = setReservations(state, getReservations(state) + 1);
 
-            if (this.state.compareAndSet(state, newState))
+            if (this.state.compareAndSet(state, newState)) {
+                release0Track = null;
+
                 return true;
+            }
         }
     }
 
@@ -472,6 +475,19 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
             hld.size.addAndGet(sizeChange);
 
         release0(sizeChange);
+    }
+
+    /** */
+    private static final CallTracker RELEASE0_TRACKER = CallTracker.named("GDLP-release0");
+
+    /** */
+    private volatile CallTracker.Track release0Track;
+
+    /**
+     *
+     */
+    public CallTracker.Track release0Track() {
+        return release0Track;
     }
 
     /**
@@ -496,6 +512,8 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
             if (this.state.compareAndSet(state, newState)) {
                 // If no more reservations try to continue delayed renting.
                 if (reservations == 0) {
+                    release0Track = RELEASE0_TRACKER.track();
+
                     if (delayedRentingTopVer != 0 &&
                         // Prevents delayed renting on topology which expects ownership.
                         delayedRentingTopVer == ctx.exchange().readyAffinityVersion().topologyVersion())
