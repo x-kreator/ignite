@@ -30,6 +30,7 @@ import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.processors.GridProcessorAdapter;
 import org.apache.ignite.internal.processors.cache.persistence.CorruptedPersistenceException;
 import org.apache.ignite.internal.processors.diagnostic.DiagnosticProcessor;
+import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
@@ -159,6 +160,9 @@ public class FailureProcessor extends GridProcessorAdapter {
 
         if (diagnosticProcessor != null)
             diagnosticProcessor.onFailure(ignite, failureCtx);
+
+        if (log.isInfoEnabled())
+            log.info(">>> Tracked calls:" + U.nl() + CallTracker.toStringAll());
 
         boolean invalidated = hnd.onFailure(ignite, failureCtx);
 

@@ -49,6 +49,7 @@ import org.apache.ignite.internal.pagemem.wal.record.delta.NewRootInitRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.RemoveRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.ReplaceRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.SplitExistingPageRecord;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
 import org.apache.ignite.internal.processors.cache.persistence.DataStructure;
 import org.apache.ignite.internal.processors.cache.persistence.tree.io.BPlusIO;
 import org.apache.ignite.internal.processors.cache.persistence.tree.io.BPlusInnerIO;
@@ -1009,7 +1010,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure implements
      */
     protected final void checkDestroyed() {
         if (destroyed.get())
-            throw new IllegalStateException(CONC_DESTROY_MSG + getName() + " at\n" + destroyTrack);
+            throw new IllegalStateException(CONC_DESTROY_MSG + getName() + " at\n" + destroyTrack + "  \nlocPart=" + locPart);
     }
 
     /** {@inheritDoc} */
@@ -2490,6 +2491,8 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure implements
 
     /** */
     private volatile CallTracker.Track destroyTrack;
+    /** */
+    private volatile String locPart;
 
     /**
      * @return {@code True} if state was changed.
@@ -2497,8 +2500,11 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure implements
     private boolean markDestroyed() {
         boolean res = destroyed.compareAndSet(false, true);
 
-        if (res)
+        if (res) {
             destroyTrack = DESTROY_TRACKER.track();
+
+            locPart = String.valueOf(GridDhtLocalPartition.LOCAL_PART.get());
+        }
 
         return res;
     }

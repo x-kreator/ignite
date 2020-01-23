@@ -483,8 +483,7 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             int reservations = getReservations(state);
 
-            if (reservations == 0)
-                return;
+            assert reservations > 0 : "Attempt to release partition without reservation: " + this;
 
             assert getPartState(state) != EVICTED : this;
 
@@ -974,15 +973,23 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
         return true;
     }
 
+    /** */
+    public static final ThreadLocal<GridDhtLocalPartition> LOCAL_PART = new ThreadLocal<>();
+
     /**
      * Release created data store for this partition.
      */
     private void destroyCacheDataStore() {
+        LOCAL_PART.set(this);
+
         try {
             grp.offheap().destroyCacheDataStore(dataStore());
         }
         catch (IgniteCheckedException e) {
             log.error("Unable to destroy cache data store on partition eviction [id=" + id + "]", e);
+        }
+        finally {
+            LOCAL_PART.remove();
         }
     }
 

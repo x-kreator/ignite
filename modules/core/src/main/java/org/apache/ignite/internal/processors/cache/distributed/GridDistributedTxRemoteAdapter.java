@@ -523,6 +523,8 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                     Set<GridDhtLocalPartition> reservedParts = new HashSet<>();
                     Set<GridDhtLocalPartition> rentedParts = new HashSet<>();
 
+                    GridDhtLocalPartition locPart0 = null;
+
                     try {
                         assert !txState.mvccEnabled() || mvccSnapshot != null : "Mvcc is not initialized: " + this;
 
@@ -538,7 +540,7 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                             GridCacheContext cacheCtx = txEntry.context();
 
                             // Prevent stale updates.
-                            GridDhtLocalPartition locPart =
+                            GridDhtLocalPartition locPart = locPart0 =
                                     cacheCtx.group().topology().localPartition(txEntry.cached().partition());
 
                             if (!near()) {
@@ -847,6 +849,8 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
 
                         err = heuristicException(ex);
 
+                        U.warn(log, "Error on processing partition: " + locPart0);
+
                         try {
                             uncommit();
                         }
@@ -860,10 +864,13 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                         for (GridDhtLocalPartition locPart : reservedParts) {
                             CallTracker.Track rentTrack = locPart.rentTrack();
 
+                            if (err != null)
+                                LT.warn(log(), "locPart=" + locPart);
+
                             locPart.release();
 
                             if (!rentedParts.contains(locPart) && rentTrack != null)
-                                U.warn(log, "part [id=" + locPart.id() + "] was rented while being reserved at\n" + rentTrack);
+                                LT.warn(log(), "part [id=" + locPart.id() + "] was rented while being reserved at\n" + rentTrack);
                         }
 
                         cctx.database().checkpointReadUnlock();
