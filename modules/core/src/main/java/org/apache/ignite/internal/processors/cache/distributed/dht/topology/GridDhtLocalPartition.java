@@ -463,6 +463,20 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     }
 
     /**
+     *
+     */
+    public boolean reserveX() {
+        reserveThread = Thread.currentThread();
+
+        boolean res = reserve();
+
+        if (!res)
+            reserveThread = null;
+
+        return res;
+    }
+
+    /**
      * Releases previously reserved partition.
      */
     @Override public void release() {
@@ -482,6 +496,9 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
     /** */
     private volatile CallTracker.Track release0Track;
+
+    /** */
+    private volatile Thread reserveThread;
 
     /**
      *
@@ -510,9 +527,15 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             // Decrement reservations.
             if (this.state.compareAndSet(state, newState)) {
+                Thread rt = reserveThread;
+
+                if (rt == Thread.currentThread())
+                    reserveThread = null;
+
                 // If no more reservations try to continue delayed renting.
                 if (reservations == 0) {
-                    release0Track = RELEASE0_TRACKER.track();
+                    if (rt != null && rt != Thread.currentThread())
+                        release0Track = RELEASE0_TRACKER.track();
 
                     if (delayedRentingTopVer != 0 &&
                         // Prevents delayed renting on topology which expects ownership.
