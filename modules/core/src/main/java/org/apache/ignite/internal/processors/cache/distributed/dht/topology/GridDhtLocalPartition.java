@@ -525,10 +525,10 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             assert getSize(newState) == getSize(state) + sizeChange;
 
+            Thread rt = reserveThread;
+
             // Decrement reservations.
             if (this.state.compareAndSet(state, newState)) {
-                Thread rt = reserveThread;
-
                 if (rt == Thread.currentThread())
                     reserveThread = null;
 
