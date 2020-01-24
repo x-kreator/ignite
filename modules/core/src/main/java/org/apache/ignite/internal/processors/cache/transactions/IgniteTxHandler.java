@@ -1768,16 +1768,10 @@ public class IgniteTxHandler {
                             tx.addWrite(entry, ctx.deploy().globalLoader());
 
                             if (txCounters != null) {
-                                try {
-                                    Long cntr = txCounters.generateNextCounter(entry.cacheId(), entry.cached().partition());
+                                Long cntr = txCounters.generateNextCounter(entry.cacheId(), entry.cached().partition());
 
-                                    if (cntr != null) // Counter is null if entry is no-op.
-                                        entry.updateCounter(cntr);
-                                }
-                                catch (RuntimeException e) {
-                                    U.error(log, "Next counter generation error [entry=" + entry + "]", e);
-                                    throw e;
-                                }
+                                if (cntr != null) // Counter is null if entry is no-op.
+                                    entry.updateCounter(cntr);
                             }
 
                             if (isNearEnabled(cacheCtx) && req.invalidateNearEntry(idx))

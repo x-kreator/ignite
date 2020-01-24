@@ -41,7 +41,6 @@ import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
 import org.apache.ignite.internal.processors.cache.KeyCacheObject;
 import org.apache.ignite.internal.processors.cache.distributed.IgniteExternalizableExpiryPolicy;
 import org.apache.ignite.internal.processors.cache.version.GridCacheVersion;
-import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.lang.GridAbsClosureX;
 import org.apache.ignite.internal.util.lang.GridPeerDeployAware;
 import org.apache.ignite.internal.util.tostring.GridToStringBuilder;
@@ -596,12 +595,6 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
         return entry;
     }
 
-    /** */
-    private static final CallTracker NULL_ENTRY_TRACKER = CallTracker.named("IgniteTxEntry.cached(null)");
-
-    /** */
-    private volatile CallTracker.Track nullEntryTrack;
-
     /**
      * @param entry Cache entry.
      */
@@ -610,9 +603,6 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
             ", entry=" + entry +
             ", ctxNear=" + ctx.isNear() +
             ", ctxDht=" + ctx.isDht() + ']';
-
-        if (entry == null)
-            nullEntryTrack = NULL_ENTRY_TRACKER.track();
 
         this.entry = entry;
     }
