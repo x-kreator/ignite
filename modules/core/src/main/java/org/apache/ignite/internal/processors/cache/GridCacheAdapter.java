@@ -1046,6 +1046,9 @@ public abstract class GridCacheAdapter<K, V> implements IgniteInternalCache<K, V
 
         assert e != null : "null entry returned by " + map.getClass().getName() + "#putEntryIfObsoleteOrAbsent() [key=" + key + ", topVer=" + topVer + "]";
 
+        if (e == null)
+            throw new NullPointerException("null entry returned by " + map.getClass().getName() + "#putEntryIfObsoleteOrAbsent() [key=" + key + ", topVer=" + topVer + "]");
+
         return e;
     }
 

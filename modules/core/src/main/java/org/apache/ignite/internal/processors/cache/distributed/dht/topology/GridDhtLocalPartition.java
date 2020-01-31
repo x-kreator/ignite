@@ -518,6 +518,9 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             assert reservations > 0 : "Attempt to release partition without reservation: " + this;
 
+            if (reservations <= 0)
+                throw new IllegalStateException("Attempt to release partition without reservation: " + this);
+
             assert getPartState(state) != EVICTED : this;
 
             long newState = setReservations(state, --reservations);
