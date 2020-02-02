@@ -17,6 +17,7 @@
 
 package org.apache.ignite.client;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import org.apache.ignite.Ignition;
 import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -60,9 +62,6 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
         "ABCDEFGHI JKLMNOPQR STUVWXYZ0 123456789 ".getChars(0, CHARS.length, CHARS, 0);
     }
 
-    /** Warm-up time. */
-    private static final long WARMUP_TIME = 60_000;
-
     /** Keys. */
     private final String[] keys = generateKeys(1_000_000, 40, 50);
 
@@ -70,13 +69,34 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
     private final byte[][] data = generateData(100_000, 500, 1500);
 
     /** Messages. */
-    private final String[] messages = generateKeys(100_000, 512, 1024);
+    private final String[] messages = generateKeys(100_000, 500, 1500);
 
     /** Keys updated. */
     private final LongAdder keysUpdated = new LongAdder();
 
     /** Keys read. */
     private final LongAdder keysRead = new LongAdder();
+
+    /** Messages lost. */
+    private final LongAdder msgsLost = new LongAdder();
+
+    /** Producer thread count. */
+    private int prodThreadNum = 30;
+
+    /** Consumer thread count. */
+    private int consThreadNum = 15;
+
+    /** Producer process delay. */
+    private long prodProcDelay = 0;
+
+    /** Consumer process delay. */
+    private long consProcDelay = 20;
+
+    /** Warm-up time. */
+    private long warmUpTime = 100;
+
+    /** Benchmark time. */
+    private long benchmarkTime = 30_000;
 
     /** Stopped. */
     private volatile boolean stopped;
@@ -113,25 +133,29 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
      */
     @Test
     public void testThroughput() throws Exception {
-        Worker producer = new Worker(this::produce, 0);
-        Worker consumer = new Worker(this::consume, 20);
+        Worker producer = new Worker(this::produce, prodProcDelay);
+        Worker consumer = new Worker(this::consume, consProcDelay);
 
-        IgniteInternalFuture<Long> prodFut = GridTestUtils.runMultiThreadedAsync(producer, 32, "producer");
+        IgniteInternalFuture<Long> prodFut = GridTestUtils.runMultiThreadedAsync(producer, prodThreadNum, "producer");
 
-        doSleep(WARMUP_TIME);
+        doSleep(warmUpTime);
 
-        IgniteInternalFuture<Long> consFut = GridTestUtils.runMultiThreadedAsync(consumer, 32, "consumer");
+        IgniteInternalFuture<Long> consFut = GridTestUtils.runMultiThreadedAsync(consumer, consThreadNum, "consumer");
 
-        doSleep(10 * 60_000);
+        doSleep(benchmarkTime);
 
         stopped = true;
 
         prodFut.get();
         consFut.get();
 
-        log.info("Keys updated/read: " + keysUpdated + "/" + keysRead);
+        log.info("warmUp/benchmark time: " + warmUpTime + "/" + benchmarkTime + " ms");
+        log.info("Keys updated/read/lost: " + keysUpdated + "/" + keysRead + "/" + msgsLost);
         log.info("Producer stat: " + producer.stat());
         log.info("Consumer stat: " + consumer.stat());
+
+        long totalTps = producer.stat().evtCnt.sum() / (benchmarkTime / 1000);
+        log.info("Updates per second, total/thread: " + totalTps + "/" + (totalTps / prodThreadNum));
     }
 
     /**
@@ -142,6 +166,7 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
         try (IgniteClient client = startClient(CLUSTER_IP_POOL[0])) {
             ClientCache<String, List<String>> cache = client.getOrCreateCache(CACHE_NAME);
 
+            log.info("Cache [name=" + cache.getName() + ", size=" + cache.size() + "]");
             cache.clear();
             log.info("Cache [name=" + cache.getName() + ", size=" + cache.size() + "]");
         }
@@ -151,28 +176,45 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
      *
      */
     @Test
+    public void testStringBytes() throws Exception {
+        for (int i = 0; i < 10; i++)
+            log.info(i + ": " + messages[i].length() + "/" + messages[i].getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    /**
+     *
+     */
+    @Test
     public void testThinClientCasOps() throws Exception {
         try (IgniteClient client = startClient(CLUSTER_IP_POOL[0])) {
-            ClientCache<String, List<String>> cache = client.getOrCreateCache(CACHE_NAME);
+            ClientCache<String, List<Object>> cache = client.getOrCreateCache(CACHE_NAME);
 
-            List<String> val0 = new ArrayList<>();
-            val0.add(messages[0]);
-            val0.add(messages[2]);
-            val0.add(messages[3]);
-
-            cache.put(keys[0], val0);
-            List<String> val0a = cache.get(keys[0]);
-
-            List<String> val1 = new ArrayList<>();
-            val1.add(messages[4]);
-            val1.add(messages[5]);
-
-            boolean replaced = cache.replace(keys[0], val0a, val1);
-
-            log.info("replaced: " + replaced + ", val0a: " + val0a);
+            doThinClientReplaceList(cache, i -> data[i]);
+            doThinClientReplaceList(cache, i -> messages[i]);
         }
     }
 
+    /**
+     * @param cache Cache.
+     * @param valFn Value fn.
+     */
+    private <V> void doThinClientReplaceList(ClientCache<String, List<V>> cache, Function<Integer, V> valFn) {
+        List<V> val0 = new ArrayList<>();
+        val0.add(valFn.apply(1));
+        val0.add(valFn.apply(2));
+        val0.add(valFn.apply(3));
+
+        cache.put(keys[0], val0);
+        List<V> val0a = cache.get(keys[0]);
+
+        List<V> val1 = new ArrayList<>();
+        val1.add(valFn.apply(4));
+        val1.add(valFn.apply(5));
+
+        boolean replaced = cache.replace(keys[0], val0a, val1);
+
+        log.info("replaced: " + replaced + ", val0a: " + val0a);
+    }
     /**
      *
      */
@@ -227,15 +269,15 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
      * @param cache Cache.
      * @param key Key.
      */
-    private void produce(ClientCache<String, List<byte[]>> cache, String key) {
-        // String msg = messages[ThreadLocalRandom.current().nextInt(messages.length)];
-        byte[] msg = data[ThreadLocalRandom.current().nextInt(data.length)];
+    private void produce(ClientCache<String, List<String>> cache, String key) {
+        String msg = messages[ThreadLocalRandom.current().nextInt(messages.length)];
+        // byte[] msg = data[ThreadLocalRandom.current().nextInt(data.length)];
 
         boolean updated = true;
 
         while (true) {
-            List<byte[]> val = cache.get(key);
-            List<byte[]> newVal;
+            List<String> val = cache.get(key);
+            List<String> newVal;
 
             if (val == null)
                 newVal = new ArrayList<>();
@@ -259,14 +301,16 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
 
         if (updated)
             keysUpdated.increment();
+        else
+            msgsLost.increment();
     }
 
     /**
      * @param cache Cache.
      * @param key Key.
      */
-    private void consume(ClientCache<String, List<byte[]>> cache, String key) {
-        List<byte[]> messages = cache.getAndRemove(key);
+    private void consume(ClientCache<String, List<String>> cache, String key) {
+        List<String> messages = cache.getAndRemove(key);
 
         if (messages != null)
             keysRead.add(messages.size());
@@ -294,7 +338,7 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
      */
     private class Worker implements Runnable {
         /** */
-        private final BiConsumer<ClientCache<String, List<byte[]>>, String> proc;
+        private final BiConsumer<ClientCache<String, List<String>>, String> proc;
         /** */
         private final long procDelay;
         /** */
@@ -303,13 +347,11 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
         private final Stat stat = new Stat();
         /** */
         private final long createTime = System.currentTimeMillis();
-        /** */
-        private int n;
 
         /**
          *
          */
-        private Worker(BiConsumer<ClientCache<String, List<byte[]>>, String> proc, long procDelay) {
+        private Worker(BiConsumer<ClientCache<String, List<String>>, String> proc, long procDelay) {
             this.proc = proc;
             this.procDelay = procDelay;
         }
@@ -317,7 +359,7 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
         /**
          * @param n N.
          */
-        private Consumer<ClientCache<String, List<byte[]>>> nCacheOp(int n) {
+        private Consumer<ClientCache<String, List<String>>> nCacheOp(int n) {
             return cache -> {
                 int keyIdx = n;
 
@@ -329,7 +371,7 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
 
                     proc.accept(cache, keys[keyIdx]);
 
-                    if (System.currentTimeMillis() - createTime > WARMUP_TIME)
+                    if (System.currentTimeMillis() - createTime > warmUpTime)
                         stat.register(System.nanoTime() - startNanos);
 
                     int wCnt = workerCnt.get();
@@ -347,7 +389,7 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
 
         /** {@inheritDoc} */
         @Override public void run() {
-            n = workerCnt.getAndIncrement();
+            int n = workerCnt.getAndIncrement();
 
             log.info("Worker #" + (n + 1) + " started.");
 

@@ -45,4 +45,11 @@ public class ProducerConsumerBenchmark {
 
         return keys;
     }
+
+    /**
+     *
+     */
+    public static class Builder {
+
+    }
 }
