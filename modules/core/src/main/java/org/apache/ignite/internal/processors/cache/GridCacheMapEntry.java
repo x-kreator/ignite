@@ -388,7 +388,7 @@ public abstract class GridCacheMapEntry extends GridMetadataAwareAdapter impleme
     /**
      * @return Local partition that owns this entry.
      */
-    protected GridDhtLocalPartition localPartition() {
+    public GridDhtLocalPartition localPartition() {
         return null;
     }
 

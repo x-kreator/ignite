@@ -168,6 +168,12 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
     /** Set if topology update sequence should be updated on partition destroy. */
     private boolean updateSeqOnDestroy;
 
+    /** */
+    private static final CallTracker NEW_TRACKER = CallTracker.named("GDLP::new");
+
+    /** */
+    private final CallTracker.Track newTrack = NEW_TRACKER.track();
+
     /**
      * @param ctx Context.
      * @param grp Cache group.

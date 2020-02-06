@@ -44,6 +44,7 @@ import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.GridCacheEntryEx;
 import org.apache.ignite.internal.processors.cache.GridCacheEntryRemovedException;
 import org.apache.ignite.internal.processors.cache.GridCacheFilterFailedException;
+import org.apache.ignite.internal.processors.cache.GridCacheMapEntry;
 import org.apache.ignite.internal.processors.cache.GridCacheMvccCandidate;
 import org.apache.ignite.internal.processors.cache.GridCacheOperation;
 import org.apache.ignite.internal.processors.cache.GridCacheReturn;
@@ -51,6 +52,7 @@ import org.apache.ignite.internal.processors.cache.GridCacheReturnCompletableWra
 import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
 import org.apache.ignite.internal.processors.cache.GridCacheUpdateTxResult;
 import org.apache.ignite.internal.processors.cache.KeyCacheObject;
+import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtCacheEntry;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtInvalidPartitionException;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionState;
@@ -581,6 +583,15 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                         cached.markObsolete(xidVer);
 
                                         break;
+                                    }
+
+                                    if (cached instanceof GridCacheMapEntry) {
+                                        GridDhtLocalPartition cachedLocPart = ((GridCacheMapEntry)cached).localPartition();
+
+                                        if (locPart != cachedLocPart) {
+                                            LT.warn(log(), "Cached partition isn't same as reserved for operation [locPart=" +
+                                                locPart + "\n, cachedLocPart=" + cachedLocPart);
+                                        }
                                     }
 
                                     GridNearCacheEntry nearCached = null;
