@@ -226,7 +226,6 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
      */
     public IgniteTxEntry() {
         /* No-op. */
-        nullEntryTrack = NULL_ENTRY_TRACKER.track();
     }
 
     /**
@@ -622,10 +621,10 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
     }
 
     /** */
-    private static final CallTracker NULL_ENTRY_TRACKER = CallTracker.named("IgniteTxEntry.cached(null)");
+    private static final CallTracker CACHED_TRACKER = CallTracker.named("IgniteTxEntry.cached(e)");
 
     /** */
-    private volatile CallTracker.Track nullEntryTrack;
+    private volatile CallTracker.Track cachedTrack;
 
     /**
      * @param entry Cache entry.
@@ -636,8 +635,8 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
             ", ctxNear=" + ctx.isNear() +
             ", ctxDht=" + ctx.isDht() + ']';
 
-        if (entry == null)
-            nullEntryTrack = NULL_ENTRY_TRACKER.track();
+        if (this.entry == null)
+            cachedTrack = CACHED_TRACKER.track();
 
         this.entry = entry;
     }
