@@ -18,9 +18,11 @@
 package org.apache.ignite.client;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Supplier;
 import javax.cache.Cache;
+import org.jetbrains.annotations.NotNull;
 
 /**
  *
@@ -66,12 +68,12 @@ public class ProducerConsumerOperations<K, V> {
     /**
      * @param cache Cache.
      * @param key Key.
-     * @return Number of messages read.
+     * @return List of messages read.
      */
-    public int consume(CacheOps<K, List<V>> cache, K key) {
+    @NotNull public List<V> consume(CacheOps<K, List<V>> cache, K key) {
         List<V> messages = cache.getAndRemove(key);
 
-        return messages != null ? messages.size() : 0;
+        return messages != null ? messages : Collections.emptyList();
     }
 
     /**

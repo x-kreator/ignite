@@ -74,19 +74,19 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
     private final LongAdder msgsLost = new LongAdder();
 
     /** Producer thread count. */
-    private int prodThreadNum = 32;
+    private int prodThreadNum = 24;
 
     /** Consumer thread count. */
-    private int consThreadNum = 8;
+    private int consThreadNum = 24;
 
     /** Producer process delay. */
     private long prodProcDelay = 0;
 
     /** Consumer process delay. */
-    private long consProcDelay = 20;
+    private long consProcDelay = 0;
 
     /** Warm-up time. */
-    private long warmUpTime = 100;
+    private long warmUpTime = 1000;
 
     /** Benchmark time. */
     private long benchmarkTime = 30_000;
@@ -255,7 +255,9 @@ public class ProducerConsumerTest extends GridCommonAbstractTest {
      * @param key Key.
      */
     private void consume(ProducerConsumerOperations.CacheOps<String, List<String>> cache, String key) {
-        keysRead.add(ops.consume(cache, key));
+        List<String> messages = ops.consume(cache, key);
+
+        keysRead.add(messages.size());
     }
 
     /**
