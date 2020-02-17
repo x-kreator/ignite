@@ -8,7 +8,17 @@ import org.yardstickframework.BenchmarkConfiguration;
 /**
  *
  */
-public class IgniteThinProducerConsumerBenchmark extends IgniteThinCacheAbstractBenchmark<String, List<String>> {
+public class IgniteThinProducerConsumerAbstractBenchmark extends IgniteThinCacheAbstractBenchmark<String, List<String>> {
+    /**
+     * Operations.
+     */
+    protected ProducerConsumerOperations<String, String> ops = new ProducerConsumerOperations<>();
+
+    /**
+     * Data.
+     */
+    private RandomStringData data = new RandomStringData();
+
     /** {@inheritDoc} */
     @Override public void setUp(BenchmarkConfiguration cfg) throws Exception {
         super.setUp(cfg);
