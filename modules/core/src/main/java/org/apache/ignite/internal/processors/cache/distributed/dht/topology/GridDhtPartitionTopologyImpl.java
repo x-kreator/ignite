@@ -948,6 +948,8 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
 
         loc = locParts.get(p);
 
+        // TODO track parts (p values) here!!!
+
         GridDhtPartitionState state = loc != null ? loc.state() : null;
 
         if (loc != null && state != EVICTED && (state != RENTING || showRenting))
