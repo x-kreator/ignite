@@ -23,12 +23,15 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.stream.Collectors;
@@ -50,6 +53,7 @@ import org.apache.ignite.internal.processors.cache.CacheGroupContext;
 import org.apache.ignite.internal.processors.cache.ExchangeDiscoveryEvents;
 import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedContext;
+import org.apache.ignite.internal.processors.cache.KeyCacheObject;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtCacheEntry;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtTopologyFuture;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.CachePartitionFullCountersMap;
@@ -58,6 +62,7 @@ import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.Gri
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionFullMap;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionMap;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsExchangeFuture;
+import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.F0;
 import org.apache.ignite.internal.util.GridAtomicLong;
 import org.apache.ignite.internal.util.GridLongList;
@@ -65,6 +70,7 @@ import org.apache.ignite.internal.util.GridPartitionStateMap;
 import org.apache.ignite.internal.util.StripedCompositeReadWriteLock;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.F;
+import org.apache.ignite.internal.util.typedef.T2;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
@@ -932,6 +938,14 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
         }
     }
 
+    /** */
+    @GridToStringExclude
+    public final ConcurrentMap<Integer, T2<Collection<Integer>, Collection<Integer>>> locPart0Requests = new ConcurrentHashMap<>();
+
+    /** */
+    @GridToStringExclude
+    public static final ThreadLocal<KeyCacheObject> lp0NearSingleGet = new ThreadLocal<>();
+
     /**
      * @param p Partition number.
      * @param topVer Topology version.
@@ -948,7 +962,22 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
 
         loc = locParts.get(p);
 
-        // TODO track parts (p values) here!!!
+        T2<Integer, Integer> t;
+        if (create && lp0NearSingleGet.get() != null) {
+            CallTracker.named("GDPTI-localPartition0").track();
+
+            locPart0Requests.compute(p, (key, val) -> {
+                if (val == null)
+                    val = new T2<>(new LinkedHashSet<>(), new LinkedHashSet<>());
+
+                KeyCacheObject kco = lp0NearSingleGet.get();
+
+                val.get1().add(kco.partition());
+                val.get2().add(kco.value(null, false));
+
+                return val;
+            });
+        }
 
         GridDhtPartitionState state = loc != null ? loc.state() : null;
 

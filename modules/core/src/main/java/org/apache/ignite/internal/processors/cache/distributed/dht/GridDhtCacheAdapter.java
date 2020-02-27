@@ -65,6 +65,7 @@ import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.Gri
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtInvalidPartitionException;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionTopology;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionTopologyImpl;
 import org.apache.ignite.internal.processors.cache.distributed.near.CacheVersionedValue;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearCacheAdapter;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearGetRequest;
@@ -933,8 +934,12 @@ public abstract class GridDhtCacheAdapter<K, V> extends GridDistributedCacheAdap
 
         final CacheExpiryPolicy expiryPlc = CacheExpiryPolicy.fromRemote(req.createTtl(), req.accessTtl());
 
-        IgniteInternalFuture<GridCacheEntryInfo> fut =
-            getDhtSingleAsync(
+        IgniteInternalFuture<GridCacheEntryInfo> fut;
+
+        GridDhtPartitionTopologyImpl.lp0NearSingleGet.set(req.key());
+
+        try {
+            fut = getDhtSingleAsync(
                 nodeId,
                 req.messageId(),
                 req.key(),
@@ -948,6 +953,10 @@ public abstract class GridDhtCacheAdapter<K, V> extends GridDistributedCacheAdap
                 req.recovery(),
                 req.txLabel(),
                 req.mvccSnapshot());
+        }
+        finally {
+            GridDhtPartitionTopologyImpl.lp0NearSingleGet.set(null);
+        }
 
         fut.listen(new CI1<IgniteInternalFuture<GridCacheEntryInfo>>() {
             @Override public void apply(IgniteInternalFuture<GridCacheEntryInfo> f) {

@@ -26,6 +26,7 @@ import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.IgniteFutureTimeoutCheckedException;
+import org.apache.ignite.internal.processors.cache.distributed.dht.GridPartitionedSingleGetFuture;
 import org.apache.ignite.internal.util.future.GridCompoundIdentityFuture;
 import org.apache.ignite.internal.util.typedef.internal.LT;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -47,9 +48,13 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     /** */
     private static final ThreadLocal<IgniteCache<Integer, Object>> TL_CACHE = new ThreadLocal<>();
     /** */
-    private static final int KEY_RANGE = 1_000_000;
+    private static final int KEY_RANGE = 1_000_000
+        ;
     /** */
     private boolean clientMode;
+    /** */
+    private boolean randomKeys = true
+        ;
     /** */
     private volatile boolean stopLoad;
     /** */
@@ -117,6 +122,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         }
         finally {
             LT.info(log, "Tx load alive threads: " + txLoadAliveThreads);
+            LT.info(log, "getRequestTrackRoutes: " + GridPartitionedSingleGetFuture.getRequestTrackRoutes);
         }
     }
 
@@ -163,14 +169,34 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
      * @param cache Cache.
      */
     private void cacheOp(IgniteCache<Integer, Object> cache) {
-        int key = nextRandom(0, KEY_RANGE / 2);
+        int key = nextKey1();
 
         Object val = cache.get(key);
 
         if (val != null)
-            key = nextRandom(KEY_RANGE / 2, KEY_RANGE);
+            key = nextKey2();
 
         cache.put(key, new SampleValue(key));
+    }
+
+    /** */
+    private ThreadLocal<CyclicSequence> seq1 = ThreadLocal.withInitial(() -> new CyclicSequence(0, KEY_RANGE / 2));
+
+    /** */
+    private ThreadLocal<CyclicSequence> seq2 = ThreadLocal.withInitial(() -> new CyclicSequence(KEY_RANGE / 2, KEY_RANGE));
+
+    /**
+     *
+     */
+    private int nextKey1() {
+        return randomKeys ? nextRandom(0, KEY_RANGE / 2) : seq1.get().next();
+    }
+
+    /**
+     *
+     */
+    private int nextKey2() {
+        return randomKeys ? nextRandom(KEY_RANGE / 2, KEY_RANGE) : seq2.get().next();
     }
 
     /**
@@ -204,6 +230,41 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         /** {@inheritDoc} */
         @Override public boolean equals(Object obj) {
             return obj instanceof SampleValue && ((SampleValue)obj).val == val;
+        }
+    }
+
+    /**
+     *
+     */
+    private static class CyclicSequence {
+        /** */
+        private final AtomicInteger val = new AtomicInteger();
+        /** */
+        private final int min;
+        /** */
+        private final int max;
+
+        /**
+         * @param min Min.
+         * @param max Max.
+         */
+        private CyclicSequence(int min, int max) {
+            this.min = min;
+            this.max = max;
+
+            val.set(min);
+        }
+
+        /**
+         *
+         */
+        public int next() {
+            while (true) {
+                int v = val.get();
+
+                if (val.compareAndSet(v, v == max ? min : v + 1))
+                    return v;
+            }
         }
     }
 }

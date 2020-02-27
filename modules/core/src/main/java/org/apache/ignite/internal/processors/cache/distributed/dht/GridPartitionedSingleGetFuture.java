@@ -20,9 +20,12 @@ package org.apache.ignite.internal.processors.cache.distributed.dht;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.ignite.IgniteCheckedException;
@@ -55,8 +58,10 @@ import org.apache.ignite.internal.processors.cache.distributed.near.GridNearSing
 import org.apache.ignite.internal.processors.cache.mvcc.MvccSnapshot;
 import org.apache.ignite.internal.processors.cache.persistence.CacheDataRow;
 import org.apache.ignite.internal.processors.cache.version.GridCacheVersion;
+import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.tostring.GridToStringInclude;
 import org.apache.ignite.internal.util.typedef.F;
+import org.apache.ignite.internal.util.typedef.T2;
 import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -241,6 +246,12 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
         map(mappingTopVer);
     }
 
+    /** */
+    private static final CallTracker GET_REQUEST_TRACKER = CallTracker.named("SingleGetRequest-creation");
+
+    /** */
+    public static final Map<CallTracker.Track, LinkedHashSet<T2<UUID, UUID>>> getRequestTrackRoutes = new ConcurrentHashMap<>();
+
     /**
      * @param topVer Topology version.
      */
@@ -325,6 +336,15 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
 
                 postProcessingClos = postClos;
             }
+
+            getRequestTrackRoutes.compute(GET_REQUEST_TRACKER.track(), (k, v) -> {
+                if (v == null)
+                    v = new LinkedHashSet<>();
+
+                v.add(new T2<>(cctx.kernalContext().localNodeId(), node.id()));
+
+                return v;
+            });
 
             GridCacheMessage req = new GridNearSingleGetRequest(
                 cctx.cacheId(),

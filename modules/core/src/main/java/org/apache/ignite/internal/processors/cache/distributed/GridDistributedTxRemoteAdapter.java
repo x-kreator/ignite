@@ -55,6 +55,8 @@ import org.apache.ignite.internal.processors.cache.KeyCacheObject;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtInvalidPartitionException;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionState;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionTopology;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionTopologyImpl;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearCacheEntry;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteInternalTx;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteTxAdapter;
@@ -564,6 +566,18 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                 if (state == RENTING || state == EVICTED) {
                                     LT.warn(log(), "Skipping update to partition that is concurrently evicting " +
                                         "[grp=" + cacheCtx.group().cacheOrGroupName() + ", part=" + locPart + "]");
+
+                                    GridDhtPartitionTopology top = cacheCtx.group().topology();
+
+                                    if (top instanceof GridDhtPartitionTopologyImpl) {
+                                        Map<Integer, ?> locPart0Requests = ((GridDhtPartitionTopologyImpl) top).locPart0Requests;
+
+                                        LT.warn(log(), "locPart.id=" + locPart.id() +
+                                            ", internalSize=" + locPart.internalSize() +
+                                            ", fullSize=" + locPart.fullSize() +
+                                            ", txEntryKeyVal=" + txEntry.key().value(null, false) +
+                                            "\n  requested=" + locPart0Requests.get(locPart.id()));
+                                    }
 
                                     continue;
                                 }
