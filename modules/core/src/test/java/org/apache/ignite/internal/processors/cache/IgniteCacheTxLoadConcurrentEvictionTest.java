@@ -18,15 +18,18 @@
 package org.apache.ignite.internal.processors.cache;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.IgniteFutureTimeoutCheckedException;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridPartitionedSingleGetFuture;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionTopologyImpl;
 import org.apache.ignite.internal.util.future.GridCompoundIdentityFuture;
 import org.apache.ignite.internal.util.typedef.internal.LT;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -53,12 +56,14 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     /** */
     private boolean clientMode;
     /** */
-    private boolean randomKeys = true
+    private volatile int keyType = 1 // 0 - sequental, 1 - random, 2 - saved random
         ;
     /** */
     private volatile boolean stopLoad;
     /** */
     private final AtomicInteger txLoadAliveThreads = new AtomicInteger();
+    /** */
+    private final LongAdder totalTxs = new LongAdder();
 
     /** {@inheritDoc} */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
@@ -69,7 +74,8 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
             .setCacheMode(PARTITIONED)
             .setAtomicityMode(TRANSACTIONAL)
             .setWriteSynchronizationMode(PRIMARY_SYNC)
-            .setBackups(1);
+            .setBackups(1)
+            ;
 
         cfg.setCacheConfiguration(cacheCfg);
 
@@ -107,8 +113,13 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
         LT.info(log, ">>> Half test time passed...");
 
+        //randomKeys = false;
+
         IgniteEx ignite3 = startGrid(3);
-        IgniteEx ignite4 = startGrid(4);
+        LT.info(log, ">>> Node started: " + ignite3.name());
+
+        //IgniteEx ignite4 = startGrid(4);
+        //LT.info(log, ">>> Node started: " + ignite4.name());
 
         doSleep(10_000);
 
@@ -123,6 +134,21 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         finally {
             LT.info(log, "Tx load alive threads: " + txLoadAliveThreads);
             LT.info(log, "getRequestTrackRoutes: " + GridPartitionedSingleGetFuture.getRequestTrackRoutes);
+            LT.info(log, "Total txs: " + totalTxs.sum());
+            LT.info(log, "SingleGetRequests created/processed: " +
+                GridPartitionedSingleGetFuture.singleGetRequestsCreated.sum() + "/" +
+                GridDhtPartitionTopologyImpl.locPart0ReqCnt.sum());
+
+            if (keyType == 1) {
+                int[] keys1 = new int[rndSeq1Idx.get()];
+                int[] keys2 = new int[rndSeq2Idx.get()];
+
+                System.arraycopy(rndSeq1, 0, keys1, 0, keys1.length);
+                System.arraycopy(rndSeq2, 0, keys2, 0, keys2.length);
+
+                LT.info(log, Arrays.toString(keys1));
+                LT.info(log, Arrays.toString(keys2));
+            }
         }
     }
 
@@ -155,6 +181,8 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         while (!stopLoad) {
             try {
                 doInTransaction(client, OPTIMISTIC, SERIALIZABLE, clo);
+
+                totalTxs.increment();
             }
             catch (TransactionOptimisticException ignored) {
                 // No-op
@@ -180,23 +208,67 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     }
 
     /** */
-    private ThreadLocal<CyclicSequence> seq1 = ThreadLocal.withInitial(() -> new CyclicSequence(0, KEY_RANGE / 2));
+    private final ThreadLocal<CyclicSequence> seq1 = ThreadLocal.withInitial(() -> new CyclicSequence(0, KEY_RANGE / 2));
 
     /** */
-    private ThreadLocal<CyclicSequence> seq2 = ThreadLocal.withInitial(() -> new CyclicSequence(KEY_RANGE / 2, KEY_RANGE));
+    private final ThreadLocal<CyclicSequence> seq2 = ThreadLocal.withInitial(() -> new CyclicSequence(KEY_RANGE / 2, KEY_RANGE));
+
+    /** */
+    private final int[] rndSeq1 = new int[KEY_RANGE / 2];
+    /** */
+    private final int[] rndSeq2 = new int[KEY_RANGE / 2];
+
+    /** */
+    private final AtomicInteger rndSeq1Idx = new AtomicInteger();
+    /** */
+    private final AtomicInteger rndSeq2Idx = new AtomicInteger();
 
     /**
      *
      */
     private int nextKey1() {
-        return randomKeys ? nextRandom(0, KEY_RANGE / 2) : seq1.get().next();
+        switch (keyType) {
+            case 0:
+                return seq1.get().next();
+
+            case 1:
+                return rndSeq1[rndSeq1Idx.getAndIncrement()] = nextRandom(0, KEY_RANGE / 2);
+
+            /*case 2:
+                int i = rndSeq1Idx.getAndIncrement();
+
+                if (i >= SAVED_RANDOM_KEYS1.length)
+                    rndSeq1Idx.set(i = 0);
+
+                return SAVED_RANDOM_KEYS1[i];*/
+
+            default:
+                throw new IllegalStateException("Invalid keyType: " + keyType);
+        }
     }
 
     /**
      *
      */
     private int nextKey2() {
-        return randomKeys ? nextRandom(KEY_RANGE / 2, KEY_RANGE) : seq2.get().next();
+        switch (keyType) {
+            case 0:
+                return seq2.get().next();
+
+            case 1:
+                return rndSeq2[rndSeq2Idx.getAndIncrement()] = nextRandom(KEY_RANGE / 2, KEY_RANGE);
+
+            /*case 2:
+                int i = rndSeq2Idx.getAndIncrement();
+
+                if (i >= SAVED_RANDOM_KEYS2.length)
+                    rndSeq2Idx.set(i = 0);
+
+                return SAVED_RANDOM_KEYS2[i];*/
+
+            default:
+                throw new IllegalStateException("Invalid keyType: " + keyType);
+        }
     }
 
     /**

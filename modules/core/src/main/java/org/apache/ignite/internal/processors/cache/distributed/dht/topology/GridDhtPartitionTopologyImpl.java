@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
@@ -944,6 +945,10 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
 
     /** */
     @GridToStringExclude
+    public static final LongAdder locPart0ReqCnt = new LongAdder();
+
+    /** */
+    @GridToStringExclude
     public static final ThreadLocal<KeyCacheObject> lp0NearSingleGet = new ThreadLocal<>();
 
     /**
@@ -962,13 +967,16 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
 
         loc = locParts.get(p);
 
-        T2<Integer, Integer> t;
         if (create && lp0NearSingleGet.get() != null) {
             CallTracker.named("GDPTI-localPartition0").track();
+
+            locPart0ReqCnt.increment();
 
             locPart0Requests.compute(p, (key, val) -> {
                 if (val == null)
                     val = new T2<>(new LinkedHashSet<>(), new LinkedHashSet<>());
+
+                // TODO Ассоциировать ключи с запрашивающими узлами!
 
                 KeyCacheObject kco = lp0NearSingleGet.get();
 

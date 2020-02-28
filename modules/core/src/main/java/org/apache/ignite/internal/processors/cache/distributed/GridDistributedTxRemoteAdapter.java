@@ -410,6 +410,7 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
 
     /** {@inheritDoc} */
     @Override public Collection<IgniteTxEntry> writeEntries() {
+        // this/txState: o.a.i.i.processors.cache.distributed.dht.GridDhtTxRemote/o.a.i.i.processors.cache.transactions.IgniteTxRemoteSingleStateImpl
         return txState.writeEntries();
     }
 
@@ -576,7 +577,8 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                             ", internalSize=" + locPart.internalSize() +
                                             ", fullSize=" + locPart.fullSize() +
                                             ", txEntryKeyVal=" + txEntry.key().value(null, false) +
-                                            "\n  requested=" + locPart0Requests.get(locPart.id()));
+                                            "\n  requested=" + locPart0Requests.get(locPart.id())
+                                        );
                                     }
 
                                     continue;

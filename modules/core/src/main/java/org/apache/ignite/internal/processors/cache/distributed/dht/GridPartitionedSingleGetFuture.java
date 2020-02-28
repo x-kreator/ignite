@@ -28,6 +28,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.cluster.ClusterNode;
@@ -251,6 +252,8 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
 
     /** */
     public static final Map<CallTracker.Track, LinkedHashSet<T2<UUID, UUID>>> getRequestTrackRoutes = new ConcurrentHashMap<>();
+    /** */
+    public static final LongAdder singleGetRequestsCreated = new LongAdder();
 
     /**
      * @param topVer Topology version.
@@ -345,6 +348,8 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
 
                 return v;
             });
+
+            singleGetRequestsCreated.increment();
 
             GridCacheMessage req = new GridNearSingleGetRequest(
                 cctx.cacheId(),

@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -106,6 +107,9 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
         }
     }
 
+    /** */
+    private final Map<String, Set<Integer>> evictedPartIds = new ConcurrentHashMap<>();
+
     /**
      * Adds partition to eviction queue and starts eviction process if permit available.
      *
@@ -122,9 +126,20 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
 
         int bucket;
 
+        String grpKey = cctx.igniteInstanceName() + "@" + grp.name();
+
         synchronized (mux) {
             if (!grpEvictionCtx.partIds.add(part.id()))
                 return;
+
+            evictedPartIds.compute(grpKey, (k, v) -> {
+                if (v == null)
+                    v = new TreeSet<>();
+
+                v.add(part.id());
+
+                return v;
+            });
 
             bucket = evictionQueue.offer(new PartitionEvictionTask(part, grpEvictionCtx));
         }
@@ -263,6 +278,12 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
         evictionGrps.forEach(GroupEvictionContext::stop);
 
         evictionGrps.forEach(GroupEvictionContext::awaitFinishAll);
+
+        evictedPartIds.forEach((name, partIds) -> {
+            LT.info(log(), "Evicted partitions of group " + name + ": " + partIds.size() + "\n  " + partIds);
+        });
+
+        LT.info(log(), cctx.igniteInstanceName() + " eviction queue max size: " + evictionQueue.maxSize.get());
     }
 
     /**
@@ -456,6 +477,9 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
         /** Queues contains partitions scheduled for eviction. */
         final Queue<PartitionEvictionTask>[] buckets;
 
+        /** */
+        final AtomicInteger maxSize = new AtomicInteger();
+
         /**
          * @param buckets Number of buckets.
          */
@@ -538,10 +562,20 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
          */
         private int calculateBucket() {
             int min = 0;
+            int size = 0;
 
             for (int bucket = min; bucket < bucketSizes.length; bucket++) {
                 if (bucketSizes[min] > bucketSizes[bucket])
                     min = bucket;
+
+                size += buckets[bucket].size();
+            }
+
+            while (true) {
+                int oldMaxSize = maxSize.get();
+
+                if (size <= oldMaxSize || maxSize.compareAndSet(oldMaxSize, size))
+                    break;
             }
 
             return min;
