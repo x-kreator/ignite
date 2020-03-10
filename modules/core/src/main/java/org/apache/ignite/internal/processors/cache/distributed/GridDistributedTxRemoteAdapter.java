@@ -551,7 +551,7 @@ public abstract class GridDistributedTxRemoteAdapter extends IgniteTxAdapter
                                 if (locPart == null)
                                     continue;
 
-                                if (!reservedParts.contains(locPart) && locPart.reserveX()) {
+                                if (!reservedParts.contains(locPart) && locPart.reserve()) {
                                     GridDhtPartitionState state = locPart.state();
 
                                     assert state != EVICTED && locPart.reservations() > 0 : locPart;

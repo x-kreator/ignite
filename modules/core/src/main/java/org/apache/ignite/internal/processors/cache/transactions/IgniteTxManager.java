@@ -755,6 +755,9 @@ public class IgniteTxManager extends GridCacheSharedManagerAdapter {
         IgniteInternalTx t;
 
         if ((t = txIdMap.putIfAbsent(tx.xidVersion(), tx)) == null) {
+            if (tx instanceof GridDhtTxRemote)
+                ((IgniteTxAdapter)tx).trackTxMap();
+
             if (tx.local() && !tx.dht()) {
                 assert tx instanceof GridNearTxLocal : tx;
 

@@ -460,26 +460,9 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             long newState = setReservations(state, getReservations(state) + 1);
 
-            if (this.state.compareAndSet(state, newState)) {
-                release0Track = null;
-
+            if (this.state.compareAndSet(state, newState))
                 return true;
-            }
         }
-    }
-
-    /**
-     *
-     */
-    public boolean reserveX() {
-        reserveThread = Thread.currentThread();
-
-        boolean res = reserve();
-
-        if (!res)
-            reserveThread = null;
-
-        return res;
     }
 
     /**
@@ -497,22 +480,6 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
         release0(sizeChange);
     }
 
-    /** */
-    private static final CallTracker RELEASE0_TRACKER = CallTracker.named("GDLP-release0");
-
-    /** */
-    private volatile CallTracker.Track release0Track;
-
-    /** */
-    private volatile Thread reserveThread;
-
-    /**
-     *
-     */
-    public CallTracker.Track release0Track() {
-        return release0Track;
-    }
-
     /**
      * @param sizeChange Size change delta.
      */
@@ -524,9 +491,6 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             assert reservations > 0 : "Attempt to release partition without reservation: " + this;
 
-            if (reservations <= 0)
-                throw new IllegalStateException("Attempt to release partition without reservation: " + this);
-
             assert getPartState(state) != EVICTED : this;
 
             long newState = setReservations(state, --reservations);
@@ -534,18 +498,10 @@ public class GridDhtLocalPartition extends GridCacheConcurrentMapImpl implements
 
             assert getSize(newState) == getSize(state) + sizeChange;
 
-            Thread rt = reserveThread;
-
             // Decrement reservations.
             if (this.state.compareAndSet(state, newState)) {
-                if (rt == Thread.currentThread())
-                    reserveThread = null;
-
                 // If no more reservations try to continue delayed renting.
                 if (reservations == 0) {
-                    if (rt != null && rt != Thread.currentThread())
-                        release0Track = RELEASE0_TRACKER.track();
-
                     if (delayedRentingTopVer != 0 &&
                         // Prevents delayed renting on topology which expects ownership.
                         delayedRentingTopVer == ctx.exchange().readyAffinityVersion().topologyVersion())

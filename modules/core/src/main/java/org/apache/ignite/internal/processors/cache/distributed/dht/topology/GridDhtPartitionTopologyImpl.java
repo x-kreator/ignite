@@ -163,6 +163,11 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
     /** Factory used for re-creating partition during it's lifecycle. */
     private PartitionFactory partFactory;
 
+    /** */
+    public volatile CallTracker.Track createTrack;
+    /** */
+    public volatile CallTracker.Track initPartsTrack;
+
     /**
      * @param ctx Cache shared context.
      * @param grp Cache group.
@@ -186,6 +191,8 @@ public class GridDhtPartitionTopologyImpl implements GridDhtPartitionTopology {
         cntrMap = new CachePartitionFullCountersMap(locParts.length());
 
         partFactory = (ctx1, grp1, id) -> new GridDhtLocalPartition(ctx1, grp1, id, false);
+
+        createTrack = CallTracker.named("GDPTI::new").track();
     }
 
     /**

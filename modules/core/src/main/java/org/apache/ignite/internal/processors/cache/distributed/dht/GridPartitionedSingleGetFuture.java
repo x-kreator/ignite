@@ -340,7 +340,7 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
                 postProcessingClos = postClos;
             }
 
-            getRequestTrackRoutes.compute(GET_REQUEST_TRACKER.track(), (k, v) -> {
+/*            getRequestTrackRoutes.compute(GET_REQUEST_TRACKER.track(), (k, v) -> {
                 if (v == null)
                     v = new LinkedHashSet<>();
 
@@ -350,7 +350,7 @@ public class GridPartitionedSingleGetFuture extends GridCacheFutureAdapter<Objec
             });
 
             singleGetRequestsCreated.increment();
-
+*/
             GridCacheMessage req = new GridNearSingleGetRequest(
                 cctx.cacheId(),
                 futId.localId(),

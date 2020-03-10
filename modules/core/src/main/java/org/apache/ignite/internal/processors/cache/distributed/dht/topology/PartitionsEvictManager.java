@@ -20,10 +20,10 @@ package org.apache.ignite.internal.processors.cache.distributed.dht.topology;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -108,7 +108,7 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
     }
 
     /** */
-    private final Map<String, Set<Integer>> evictedPartIds = new ConcurrentHashMap<>();
+    private final Map<String, Collection<Integer>> evictedPartIds = new ConcurrentHashMap<>();
 
     /**
      * Adds partition to eviction queue and starts eviction process if permit available.
@@ -134,7 +134,7 @@ public class PartitionsEvictManager extends GridCacheSharedManagerAdapter {
 
             evictedPartIds.compute(grpKey, (k, v) -> {
                 if (v == null)
-                    v = new TreeSet<>();
+                    v = new LinkedHashSet<>();
 
                 v.add(part.id());
 

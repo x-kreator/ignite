@@ -78,6 +78,7 @@ import org.apache.ignite.internal.processors.cache.version.GridCacheVersionedEnt
 import org.apache.ignite.internal.transactions.IgniteTxHeuristicCheckedException;
 import org.apache.ignite.internal.transactions.IgniteTxRollbackCheckedException;
 import org.apache.ignite.internal.transactions.IgniteTxTimeoutCheckedException;
+import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.GridSetWrapper;
 import org.apache.ignite.internal.util.future.GridFutureAdapter;
 import org.apache.ignite.internal.util.lang.GridMetadataAwareAdapter;
@@ -292,6 +293,21 @@ public abstract class IgniteTxAdapter extends GridMetadataAwareAdapter implement
 
     /** Transaction from which this transaction was copied by(if it was). */
     private GridNearTxLocal parentTx;
+
+    /** */
+    @GridToStringExclude
+    private static final CallTracker TX_MAP_TRACKER = CallTracker.named("ctx.tm().tx(tx.version()) != null");
+
+    /** */
+    @GridToStringInclude
+    private volatile CallTracker.Track txMapTrack;
+
+    /**
+     *
+     */
+    public void trackTxMap() {
+        txMapTrack = TX_MAP_TRACKER.track();
+    }
 
     /**
      * Empty constructor required for {@link Externalizable}.
