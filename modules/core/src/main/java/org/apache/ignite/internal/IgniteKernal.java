@@ -2438,7 +2438,7 @@ public class IgniteKernal implements IgniteEx, IgniteMXBean, Externalizable {
 
             ctx.cache().context().database().dumpStatistics(log);
 
-            String trackedCalls = CallTracker.toStringAll();
+            String trackedCalls = null; // CallTracker.toStringAll();
 
             if (!Objects.equals(lastTrackedCalls, trackedCalls)) {
                 lastTrackedCalls = trackedCalls;

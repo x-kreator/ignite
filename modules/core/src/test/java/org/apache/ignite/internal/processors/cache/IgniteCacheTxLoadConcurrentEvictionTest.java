@@ -20,6 +20,8 @@ package org.apache.ignite.internal.processors.cache;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -29,10 +31,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteInterruptedException;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -48,6 +52,7 @@ import org.apache.ignite.internal.processors.cache.distributed.dht.topology.Part
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearSingleGetRequest;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteInternalTx;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteTxEntry;
+import org.apache.ignite.internal.util.GridConcurrentHashSet;
 import org.apache.ignite.internal.util.future.GridCompoundIdentityFuture;
 import org.apache.ignite.internal.util.typedef.CI2;
 import org.apache.ignite.internal.util.typedef.T2;
@@ -58,6 +63,7 @@ import org.apache.ignite.lang.IgniteBiInClosure;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.transactions.TransactionOptimisticException;
+import org.jsr166.ConcurrentLinkedHashMap;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -121,7 +127,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     };
 
     /** */
-    private static final int[] PART_IDS = {
+    private static final int[] PART_IDS2 = {
         18, 22, 34, 46, 55, 57, 64, 74, 75, 80, 84, 85, 95, 99, 101, 102, 103, 111, 112, 119, 120, 128, 133, 145, 162,
         163, 169, 171, 172, 183, 193, 194, 200, 202, 206, 214, 216, 217, 220, 221, 223, 231, 232, 244, 252, 270, 274,
         278, 293, 294, 295, 309, 310, 311, 327, 331, 339, 346, 347, 359, 361, 365, 378, 392, 397, 400, 402, 408, 414,
@@ -131,6 +137,9 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         713, 717, 737, 742, 745, 751, 752, 759, 761, 773, 780, 783, 784, 802, 804, 806, 808, 813, 815, 819, 820, 833,
         841, 846, 853, 854, 862, 869, 880, 887, 891, 896, 901, 903, 905, 913, 918, 932, 936, 937, 938, 952, 953, 954,
         957, 959, 969, 972, 975, 980, 994, 1006, 1007, 1008};
+
+    /** */
+    private volatile int[] partIds = PART_IDS1; // PART_IDS2
 
     /**
      *
@@ -150,13 +159,23 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         /** */
         private final Map<Integer, T2<AtomicInteger, CountDownLatch[]>> partOps = new ConcurrentHashMap<>();
         /** */
-        private volatile Set<Integer> evictingPartIds;
+        private final AtomicInteger awaitingTxFinishes = new AtomicInteger();
+        /** */
+        private final AtomicInteger awaitingSingleGets = new AtomicInteger();
+        /** */
+        private final int maxConcurrentRequestsAwaiting;
+        /** */
+        private volatile Set<Integer> evictingPartIds = Collections.emptySet();
+        /** */
+        private volatile boolean active;
 
         /**
          * @param cacheCtx Cache context.
          */
         EvictionRaceDetector(GridCacheContext<?, ?> cacheCtx) {
             this.cacheCtx = cacheCtx;
+
+            maxConcurrentRequestsAwaiting = cacheCtx.kernalContext().config().getStripedPoolSize() / 2 - 1;
 
             GridCacheSharedContext<?, ?> sharedCtx = cacheCtx.shared();
             GridCacheSharedContext<?, ?> spySharedCtx = Mockito.spy(sharedCtx);
@@ -176,7 +195,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
             Mockito.doAnswer(invocation -> {
                 GridDhtLocalPartition part = invocation.getArgumentAt(1, GridDhtLocalPartition.class);
 
-                CountDownLatch latch = keyType == 3 ? beforeEvictPartitionAsync(part) : null;
+                CountDownLatch latch = active ? beforeEvictPartitionAsync(part) : null;
 
                 try {
                     return invocation.callRealMethod();
@@ -208,9 +227,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                     entry.setValue(new CI2<UUID, GridCacheMessage>() {
                         @Override public void apply(UUID uuid, GridCacheMessage msg) {
-                            if (keyType == 3)
-                                processDhtTxFinishRequest(uuid, (GridDhtTxFinishRequest)msg);
-
+                            processDhtTxFinishRequest(uuid, (GridDhtTxFinishRequest)msg);
                             oldHnd.apply(uuid, msg);
                         }
                     });
@@ -230,9 +247,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                     entry.setValue(new CI2<UUID, GridCacheMessage>() {
                         @Override public void apply(UUID uuid, GridCacheMessage msg) {
-                            if (keyType == 3)
-                                processNearSingleGetRequest(uuid, (GridNearSingleGetRequest)msg);
-
+                            processNearSingleGetRequest(uuid, (GridNearSingleGetRequest)msg);
                             oldHnd.apply(uuid, msg);
                         }
                     });
@@ -249,7 +264,59 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
          * @param evictingPartIds Evicting partition ids.
          */
         private void setEvictingPartIds(Set<Integer> evictingPartIds) {
-            this.evictingPartIds = evictingPartIds;
+            this.evictingPartIds = new GridConcurrentHashSet<>(evictingPartIds);
+        }
+
+        /**
+         * @param p Partition id.
+         */
+        private T2<AtomicInteger, CountDownLatch[]> newPartOpState(int p) {
+            return new T2<>(new AtomicInteger(0), newLatchArray(3));
+        }
+
+        /**
+         * @param limit Limit.
+         * @param state State.
+         * @param stateBits State bits.
+         */
+        private boolean enterState(AtomicInteger limit, AtomicInteger state, int stateBits) {
+            boolean limitUpdated = false;
+
+            while (true) {
+                if (limit != null && !limitUpdated) {
+                    int l = limit.get();
+
+                    if (l >= maxConcurrentRequestsAwaiting)
+                        return false;
+
+                    if (limit.compareAndSet(l, l + 1))
+                        limitUpdated = true;
+                    else
+                        continue;
+                }
+
+                int s = state.get();
+
+                if ((s & stateBits) == stateBits) {
+                    if (limit != null)
+                        limit.decrementAndGet();
+
+                    return false;
+                }
+
+                if (state.compareAndSet(s, s & stateBits))
+                    return true;
+            }
+        }
+
+        /**
+         * @param state State.
+         * @param stateBits State bits.
+         */
+        private boolean leaveState(AtomicInteger state, int stateBits) {
+            int s = state.get();
+
+            return state.compareAndSet(s, s & ~stateBits);
         }
 
         /**
@@ -257,10 +324,13 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
          * @param req Request.
          */
         private void processDhtTxFinishRequest(UUID nodeId, GridDhtTxFinishRequest req) {
+            if (!active) // FIXME
+                return;
+
             IgniteInternalTx tx = cacheCtx.shared().tm().tx(req.version());
 
             if (tx != null && tx.writeEntries() != null) {
-                System.out.println(">>> processed request: " + req + "]\n >> tx: " + tx);
+                // System.out.println(">>> processed request: " + req + "]\n >> tx: " + tx);
 
                 for (IgniteTxEntry txEntry : tx.writeEntries()) {
                     int partId = txEntry.key().partition();
@@ -268,19 +338,32 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                     if (evictingPartIds.contains(partId)) {
                         T2<AtomicInteger, CountDownLatch[]> partOpState = partOps.computeIfAbsent(
                             partId,
-                            p -> new T2<>(new AtomicInteger(0), newLatchArray(3)));
+                            this::newPartOpState);
 
-                        if (partOpState.get1() == null)
+                        if (partOpState.get1() == null) {
                             evictingPartIds.remove(partId);
-                        else if (partOpState.get1().compareAndSet(0, 1)) {
+
+                            continue;
+                        }
+
+                        if (enterState(awaitingTxFinishes, partOpState.get1(), 1)) {
                             logPartOpState("1.1", partId, partOpState);
 
                             try {
-                                partOpState.get2()[0].await();
+                                if (!partOpState.get2()[0].await(2, TimeUnit.SECONDS)) {
+                                    if (leaveState(partOpState.get1(), 1)) {
+                                        logPartOpState("1.t", partId, partOpState);
+
+                                        break;
+                                    }
+                                }
                             }
                             catch (InterruptedException e) { // FIXME !!!
                                 Thread.currentThread().interrupt();
                                 e.printStackTrace();
+                            }
+                            finally {
+                                awaitingTxFinishes.decrementAndGet();
                             }
 
                             logPartOpState("1.2", partId, partOpState);
@@ -289,10 +372,18 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                             break;
                         }
+                        else
+                            logPartOpState("1.0", partId, partOpState);
                     }
                 }
             }
         }
+
+        /** */
+        private final Map<Date, Map<Integer, AtomicInteger>> nsgrTimeMap = new ConcurrentLinkedHashMap<>();
+
+        /** */
+        private final Map<Integer, Integer> keyGetCounts = new ConcurrentHashMap<>();
 
         /**
          * @param nodeId Node id.
@@ -301,47 +392,76 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         private void processNearSingleGetRequest(UUID nodeId, GridNearSingleGetRequest req) {
             int partId = req.key().partition();
 
-            if (evictingPartIds.contains(partId)) {
-                T2<AtomicInteger, CountDownLatch[]> partOpState = partOps.get(partId);
+            Date time = new Date(U.currentTimeMillis() / 1000 * 1000);
 
-                if (partOpState == null || partOpState.get1() == null)
+            nsgrTimeMap
+                .computeIfAbsent(time, t -> new ConcurrentLinkedHashMap<>())
+                .computeIfAbsent(partId, p -> new AtomicInteger())
+                .incrementAndGet();
+
+            Integer key = req.key().value(null, false);
+
+            keyGetCounts.compute(key, (k, cnt) -> cnt != null ? cnt + 1 : 1);
+
+            if (evictingPartIds.contains(partId)) {
+                System.out.println("  >>> partId: " + partId + ", key: " + key);
+
+                if (!active) // FIXME
                     return;
 
-                while (partOpState.get1().get() < 2)
-                    ;
+                T2<AtomicInteger, CountDownLatch[]> partOpState = partOps.computeIfAbsent(
+                    partId,
+                    this::newPartOpState);
 
-                if (partOpState.get1().compareAndSet(2, 3)) {
-                    partOpState.get2()[1].countDown();
+                if (partOpState.get1() == null) {
+                    evictingPartIds.remove(partId);
 
-                    logPartOpState("3.1", partId, partOpState);
+                    return;
+                }
+
+                if (enterState(awaitingSingleGets, partOpState.get1(), 2)) {
+                    //partOpState.get2()[1].countDown();
+
+                    logPartOpState("2.1", partId, partOpState);
 
                     try {
-                        partOpState.get2()[2].await();
+                        if (!partOpState.get2()[1].await(3, TimeUnit.SECONDS)) {
+                            if (leaveState(partOpState.get1(), 2)) {
+                                logPartOpState("2.t", partId, partOpState);
+
+                                return;
+                            }
+                        }
                     }
                     catch (InterruptedException e) { // FIXME !!!
                         Thread.currentThread().interrupt();
                         e.printStackTrace();
                     }
+                    finally {
+                        awaitingSingleGets.decrementAndGet();
+                    }
 
-                    logPartOpState("3.2", partId, partOpState);
+                    logPartOpState("2.2", partId, partOpState);
 
                     Mockito.doAnswer(invocation -> {
                         Object newPart = invocation.callRealMethod();
 
                         GridTestUtils.runAsync(() -> {
-                            logPartOpState("3.3", partId, partOpState);
+                            logPartOpState("2.3", partId, partOpState);
 
                             while (cacheCtx.topology().localPartition(partId) != newPart)
                                 ;
 
                             partOpState.get2()[0].countDown();
 
-                            logPartOpState("3.4", partId, partOpState);
+                            logPartOpState("2.4", partId, partOpState);
                         });
 
                         return newPart;
                     }).when(spyPartFactory).create(Mockito.any(), Mockito.any(), partId);
                 }
+                else
+                    logPartOpState("2.0", partId, partOpState);
             }
         }
 
@@ -359,15 +479,18 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                     p -> new T2<>(null, null));
 
                 if (partOpState.get1() != null) {
-                    while (partOpState.get1().get() < 1)
-                        ;
+                    if (!enterState(null, partOpState.get1(), 3)) {
+                        logPartOpState("3.1", part.id(), partOpState);
 
-                    if (partOpState.get1().compareAndSet(1, 2)) {
-                        logPartOpState("2.1", part.id(), partOpState);
+                        //partOpState.get2()[1].await();
 
-                        partOpState.get2()[1].await();
+                        latch = partOpState.get2()[1];
+                    }
+                    else {
+                        logPartOpState("3.0", part.id(), partOpState);
 
-                        latch = partOpState.get2()[2];
+                        partOpState.get2()[0].countDown();
+                        partOpState.get2()[1].countDown();
                     }
                 }
             }
@@ -384,7 +507,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 if (GridTestUtils.waitForCondition(() -> part.state() == GridDhtPartitionState.EVICTED, 10_000)) {
                     latch.countDown();
 
-                    logPartOpState("2.2", part.id(), partOps.get(part.id()));
+                    logPartOpState("3.2", part.id(), partOps.get(part.id()));
                 }
             }
             catch (IgniteInterruptedCheckedException e) {
@@ -401,17 +524,18 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         IgniteEx ignite1 = startGrid(1);
         startGrid(2);
         startGrid(3);
-
+        startGrid(4);
         awaitPartitionMapExchange();
 
-        List<GridDhtLocalPartition> top3Parts = localPartitions(ignite1, DEFAULT_CACHE_NAME);
+//        List<GridDhtLocalPartition> top3Parts = localPartitions(ignite1, DEFAULT_CACHE_NAME);
 
         EvictionRaceDetector evictionRaceDetector = new EvictionRaceDetector(ignite1.cachex(DEFAULT_CACHE_NAME).context());
 
+        stopGrid(4);
         stopGrid(3);
-
         awaitPartitionMapExchange();
 
+/*
         List<GridDhtLocalPartition> top2Parts = localPartitions(ignite1, DEFAULT_CACHE_NAME);
 
         Set<Integer> evictingPartIds = partIds(top2Parts);
@@ -419,10 +543,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         evictingPartIds.removeAll(partIds(top3Parts));
 
         evictingPartIds.removeIf(v -> v < 105 || v > 997); // FIXME ?
-
-        log.info("Evicting partition ids: " + evictingPartIds);
-
-        evictionRaceDetector.setEvictingPartIds(evictingPartIds);
+*/
 
 
         clientMode = true;
@@ -452,7 +573,6 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         LT.info(log, ">>> Half test time passed...");
 
 
-
 /*
         GridTestUtils.runAsync(
             () -> txPutGet(clients[0], asIntSupplier(40), asIntSupplier(60)),
@@ -467,25 +587,61 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
         //randomKeys = false;
 
+        evictionRaceDetector.setEvictingPartIds(Stream.concat(
+            Arrays.stream(PART_IDS1).boxed(),
+            Arrays.stream(PART_IDS2).boxed()).collect(Collectors.toSet()));
+
+        evictionRaceDetector.active = true; // TODO
+
         IgniteEx ignite3 = startGrid(3);
         LT.info(log, ">>> Node started: " + ignite3.name());
 
         keyType = 3;
 
-        //IgniteEx ignite4 = startGrid(4);
-        //LT.info(log, ">>> Node started: " + ignite4.name());
+        partIds = PART_IDS2;
+
+        IgniteEx ignite4 = startGrid(4);
+        LT.info(log, ">>> Node started: " + ignite4.name());
+
+        // doSleep(500);
+
+        // Set<Integer> evictingPartIds = Arrays.stream(partIds).boxed().collect(Collectors.toSet());
+        // log.info("Evicting partition ids: " + evictingPartIds);
+        // evictionRaceDetector.setEvictingPartIds(evictingPartIds);
 
         doSleep(5_000);
 
         stopLoad = true;
 
-        txLoadFinishFut.get(50_000);
+        /*LT.info(log, "NSGR time map:");
+        evictionRaceDetector.nsgrTimeMap.forEach(((date, map) -> {
+            System.out.println(U.format(date, "  HH:mm:ss"));
+
+            map.forEach((part, reqCnt) -> System.out.println("    " + part + ": " + reqCnt));
+        }));*/
+
+        /*AtomicInteger evictingPartKeyGets = new AtomicInteger();
+        LT.info(log, "Evicting part count: " + evictingPartIds.size() + ", NSGR/key >1:" );
+        evictionRaceDetector.keyGetCounts.forEach((key, cnt) -> {
+            int part = evictionRaceDetector.cacheCtx.affinity().partition(key);
+
+            boolean evicting = evictingPartIds.contains(part);
+
+            if (evicting)
+                evictingPartKeyGets.incrementAndGet();
+
+            if (cnt > 1)
+                System.out.println("  key/part/cnt/evicting: " + key + "/" + part + "/" + cnt + "/" + evicting);
+        });
+        LT.info(log, "Evicting part key gets: " + evictingPartKeyGets);*/
 
         LT.info(log, "getRequestTrackRoutes: " + GridPartitionedSingleGetFuture.getRequestTrackRoutes);
         LT.info(log, "Total txs: " + totalTxs.sum());
         LT.info(log, "SingleGetRequests created/processed: " +
             GridPartitionedSingleGetFuture.singleGetRequestsCreated.sum() + "/" +
             GridDhtPartitionTopologyImpl.locPart0ReqCnt.sum());
+
+        txLoadFinishFut.get(10_000);
 
         if (keyType == 1) {
             int[] keys1 = new int[rndSeq1Idx.get()];
@@ -634,7 +790,9 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 return SAVED_RANDOM_KEYS1[i];*/
 
             case 3:
-                return PART_IDS1[nextRandom(0, PART_IDS1.length)];
+                int[] partIds = this.partIds;
+
+                return partIds[nextRandom(0, partIds.length)] + 1024 * nextRandom(0, 64);
 
             default:
                 throw new IllegalStateException("Invalid keyType: " + keyType);
@@ -661,7 +819,9 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 return SAVED_RANDOM_KEYS2[i];*/
 
             case 3:
-                return PART_IDS1[nextRandom(0, PART_IDS1.length)];
+                int[] partIds = this.partIds;
+
+                return partIds[nextRandom(0, partIds.length)] + 1024 * nextRandom(0, 64);
 
             default:
                 throw new IllegalStateException("Invalid keyType: " + keyType);
