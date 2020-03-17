@@ -34,6 +34,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -42,6 +43,7 @@ import org.apache.ignite.IgniteInterruptedException;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
+import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtTxFinishRequest;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridPartitionedSingleGetFuture;
@@ -56,6 +58,7 @@ import org.apache.ignite.internal.util.GridConcurrentHashSet;
 import org.apache.ignite.internal.util.future.GridCompoundIdentityFuture;
 import org.apache.ignite.internal.util.typedef.CI2;
 import org.apache.ignite.internal.util.typedef.T2;
+import org.apache.ignite.internal.util.typedef.T3;
 import org.apache.ignite.internal.util.typedef.internal.LT;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -206,58 +209,11 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 }
             }).when(spyEvictMgr).evictPartitionAsync(Mockito.any(), Mockito.any());
 
-            Object ch = U.field(cacheCtx.io(), "cacheHandlers");
-            ConcurrentMap<Object, IgniteBiInClosure<UUID, GridCacheMessage>> clsHandlers = U.field(ch, "clsHandlers");
-
-            boolean gridDhtTxFinishReqUpdated = false;
-            boolean gridNearSingleGetReqUpdated = false;
-
-            for (Map.Entry<Object, IgniteBiInClosure<UUID, GridCacheMessage>> entry : clsHandlers.entrySet()) {
-                if (gridDhtTxFinishReqUpdated && gridNearSingleGetReqUpdated)
-                    break;
-
-                Object key = entry.getKey();
-
-                int hndId = U.field(key, "hndId");
-
-                if (!gridDhtTxFinishReqUpdated && hndId == 0 &&
-                    GridDhtTxFinishRequest.class == U.field(key, "msgCls")) {
-
-                    IgniteBiInClosure<UUID, GridCacheMessage> oldHnd = entry.getValue();
-
-                    entry.setValue(new CI2<UUID, GridCacheMessage>() {
-                        @Override public void apply(UUID uuid, GridCacheMessage msg) {
-                            processDhtTxFinishRequest(uuid, (GridDhtTxFinishRequest)msg);
-                            oldHnd.apply(uuid, msg);
-                        }
-                    });
-
-                    log.info("Cache handler updated:\n  " + S.toString((Class<Object>) key.getClass(), key) +
-                        " -> " + entry.getValue().getClass().getName());
-
-                    gridDhtTxFinishReqUpdated = true;
-
-                    continue;
-                }
-
-                if (!gridNearSingleGetReqUpdated && hndId == cacheCtx.cacheId() &&
-                    GridNearSingleGetRequest.class == U.field(key, "msgCls")) {
-
-                    IgniteBiInClosure<UUID, GridCacheMessage> oldHnd = entry.getValue();
-
-                    entry.setValue(new CI2<UUID, GridCacheMessage>() {
-                        @Override public void apply(UUID uuid, GridCacheMessage msg) {
-                            processNearSingleGetRequest(uuid, (GridNearSingleGetRequest)msg);
-                            oldHnd.apply(uuid, msg);
-                        }
-                    });
-
-                    log.info("Cache handler updated:\n  " + S.toString((Class<Object>) key.getClass(), key) +
-                        " -> " + entry.getValue().getClass().getName());
-
-                    gridNearSingleGetReqUpdated = true;
-                }
-            }
+            addBeforeCacheHandlers(cacheCtx,
+                new T3<>(0, GridDhtTxFinishRequest.class,
+                    (nodeId, req) -> processDhtTxFinishRequest(nodeId, (GridDhtTxFinishRequest)req)),
+                new T3<>(cacheCtx.cacheId(), GridNearSingleGetRequest.class,
+                    (nodeId1, req1) -> processNearSingleGetRequest(nodeId1, (GridNearSingleGetRequest)req1)));
         }
 
         /**
@@ -595,15 +551,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         LT.info(log, ">>> Initial topology started...");
 
 
-        GridCompoundIdentityFuture<Long> txLoadFinishFut = new GridCompoundIdentityFuture<>();
-
-        for (int i = 0; i < clients.length; i++) {
-            IgniteEx c = clients[i];
-
-            txLoadFinishFut.add(GridTestUtils.runMultiThreadedAsync(() -> txLoadCycle(c), 64, "tx-load-" + i));
-        }
-
-        txLoadFinishFut.markInitialized();
+        IgniteInternalFuture<Long> txLoadFinishFut = runMassAsync(this::txLoadCycle, 64, clients);
 
         doSleep(10_000);
 
@@ -722,6 +670,45 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     }
 
     /**
+     * @param cacheCtx Cache context.
+     * @param cacheHandlers Cache handlers.
+     */
+    private static void addBeforeCacheHandlers(GridCacheContext<?, ?> cacheCtx, T3<Integer, Class<?>, CI2<UUID, GridCacheMessage>>... cacheHandlers) {
+        if (cacheHandlers == null || cacheHandlers.length == 0)
+            return;
+
+        Map<T2<Integer, Class<?>>, CI2<UUID, GridCacheMessage>> hndMap = Arrays.stream(cacheHandlers)
+            .collect(Collectors.toMap(h -> new T2<>(h.get1(), h.get2()), T3::get3));
+
+        Object ch = U.field(cacheCtx.io(), "cacheHandlers");
+        ConcurrentMap<Object, IgniteBiInClosure<UUID, GridCacheMessage>> clsHandlers = U.field(ch, "clsHandlers");
+
+        for (Map.Entry<Object, IgniteBiInClosure<UUID, GridCacheMessage>> entry : clsHandlers.entrySet()) {
+            if (hndMap.isEmpty())
+                break;
+
+            Object key = entry.getKey();
+
+            CI2<UUID, GridCacheMessage> hnd = hndMap.remove(new T2<Integer, Class<?>>(
+                U.field(key, "hndId"),
+                U.field(key, "msgCls")));
+
+            if (hnd != null) {
+                IgniteBiInClosure<UUID, GridCacheMessage> oldHnd = entry.getValue();
+
+                entry.setValue(((uuid, msg) -> {
+                    hnd.apply(uuid, msg);
+                    oldHnd.apply(uuid, msg);
+                }));
+
+                log.info("Cache handler updated:\n  " + S.toString((Class<Object>) key.getClass(), key) +
+                    " -> " + entry.getValue().getClass().getName());
+            }
+        }
+
+    }
+
+    /**
      * @param phase Phase.
      * @param partId Partition id.
      * @param partOpState Partition operation state.
@@ -729,6 +716,25 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     private static void logPartOpState(String phase, int partId, T2<AtomicInteger, CountDownLatch[]> partOpState) {
         log.info(">>> #" + phase + " partOpState[" + partId + "]: " + partOpState.get1() + "/" +
             Arrays.stream(partOpState.get2()).map(CountDownLatch::getCount).collect(Collectors.toList()));
+    }
+
+    /**
+     * @param op Node operation.
+     * @param threadNum Thread number.
+     * @param nodes Nodes.
+     */
+    private IgniteInternalFuture<Long> runMassAsync(Consumer<IgniteEx> op, int threadNum, IgniteEx... nodes) {
+        GridCompoundIdentityFuture<Long> opFinishFut = new GridCompoundIdentityFuture<>();
+
+        for (int i = 0; i < nodes.length; i++) {
+            IgniteEx c = nodes[i];
+
+            opFinishFut.add(GridTestUtils.runMultiThreadedAsync(() -> op.accept(c), threadNum, "mass-op-" + i));
+        }
+
+        opFinishFut.markInitialized();
+
+        return opFinishFut;
     }
 
     /**
