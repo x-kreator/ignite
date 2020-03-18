@@ -2722,8 +2722,8 @@ public class IgniteKernal implements IgniteEx, IgniteMXBean, Externalizable {
                         NL);
                 }
 
-            if (log.isInfoEnabled())
-                log.info(">>> Tracked calls:" + NL + CallTracker.toStringAll());
+            //if (log.isInfoEnabled())
+            //    log.info(">>> Tracked calls:" + NL + CallTracker.toStringAll());
 
             try {
                 U.onGridStop();

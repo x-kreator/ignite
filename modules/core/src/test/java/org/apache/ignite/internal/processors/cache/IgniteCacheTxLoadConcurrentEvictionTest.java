@@ -22,7 +22,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -37,7 +37,6 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteInterruptedException;
 import org.apache.ignite.configuration.CacheConfiguration;
@@ -88,8 +87,12 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     /** */
     private boolean clientMode;
     /** */
-    private volatile int keyType = 1 // 0 - sequental, 1 - random, 2 - saved random, 3 - evicting parts
+    private volatile int keyType = 1 // 0 - sequental, 1 - random, 2 - saved random, 3 - evicting parts, 4 - custom
         ;
+    /** */
+    private volatile IntSupplier keyFn1;
+    /** */
+    private volatile IntSupplier keyFn2;
     /** */
     private volatile boolean stopLoad;
     /** */
@@ -515,28 +518,52 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
     @Test
     public void testTxLoadConcurrentEviction() throws Exception {
         IgniteEx ignite1 = startGrid(1);
+
+        GridCacheContext<?, ?> cacheCtx1 = ignite1.cachex(DEFAULT_CACHE_NAME).context();
+
         startGrid(2);
         startGrid(3);
         startGrid(4);
         awaitPartitionMapExchange();
+        Set<Integer> top4PartIds = partIds(cacheCtx1.topology().localPartitions());
 
-//        List<GridDhtLocalPartition> top3Parts = localPartitions(ignite1, DEFAULT_CACHE_NAME);
-
-        EvictionRaceDetector evictionRaceDetector = new EvictionRaceDetector(ignite1.cachex(DEFAULT_CACHE_NAME).context());
+        //EvictionRaceDetector evictionRaceDetector = new EvictionRaceDetector(cacheCtx1);
 
         stopGrid(4);
+        awaitPartitionMapExchange();
+        Set<Integer> top3PartIds = partIds(cacheCtx1.topology().localPartitions());
+
         stopGrid(3);
         awaitPartitionMapExchange();
+        Set<Integer> top2PartIds = partIds(cacheCtx1.topology().localPartitions());
 
-/*
-        List<GridDhtLocalPartition> top2Parts = localPartitions(ignite1, DEFAULT_CACHE_NAME);
+        Set<Integer> evictingTop2To3PartIds = new HashSet<>(top2PartIds);
+        evictingTop2To3PartIds.removeAll(top3PartIds);
+        System.out.println("  ## top2to3: " + Arrays.toString(evictingTop2To3PartIds.stream().mapToInt(Integer::intValue).sorted().toArray()));
 
-        Set<Integer> evictingPartIds = partIds(top2Parts);
+        Set<Integer> evictingTop3To4PartIds = new HashSet<>(top3PartIds);
+        evictingTop3To4PartIds.removeAll(top4PartIds);
+        System.out.println("  ## top3to4: " + Arrays.toString(evictingTop3To4PartIds.stream().mapToInt(Integer::intValue).sorted().toArray()));
 
-        evictingPartIds.removeAll(partIds(top3Parts));
+        Set<Integer> evictingTop2To4PartIds = new HashSet<>(evictingTop2To3PartIds);
+        evictingTop2To4PartIds.addAll(evictingTop3To4PartIds);
 
-        evictingPartIds.removeIf(v -> v < 105 || v > 997); // FIXME ?
-*/
+        // evictingPartIds.removeIf(v -> v < 105 || v > 997); // FIXME ?
+
+        int[] e2To4PartIds = evictingTop2To4PartIds.stream().mapToInt(Integer::intValue).sorted().toArray();
+
+        AtomicInteger partIdsIdx = new AtomicInteger();
+
+        keyFn1 = () -> {
+            while (true) {
+                int i = partIdsIdx.get();
+
+                if (partIdsIdx.compareAndSet(i, i + 1 >= e2To4PartIds.length ? 0 : i + 1))
+                    return e2To4PartIds[i];
+            }
+        };
+
+        keyFn2 = keyFn1;
 
 
         clientMode = true;
@@ -551,9 +578,23 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         LT.info(log, ">>> Initial topology started...");
 
 
-        IgniteInternalFuture<Long> txLoadFinishFut = runMassAsync(this::txLoadCycle, 64, clients);
+        addNSGRLogging(evictingTop2To3PartIds, grid(1), grid(2));
 
-        doSleep(10_000);
+        /*addBeforeCacheHandlers(cacheCtx1,
+            new T3<>(cacheCtx1.cacheId(), GridNearSingleGetRequest.class, ((uuid, msg) -> {
+                GridNearSingleGetRequest req = (GridNearSingleGetRequest)msg;
+
+                System.out.println("  ^^ NSGR part/key: " + req.key().partition() + "/" + req.key().value(null, false) +
+                    ", uuid: " + uuid);
+            })));*/
+
+        keyType = 4;
+
+        IgniteInternalFuture<Long> txLoadFinishFut =
+            runMassAsync(this::txLoadCycle, 1, clients[0]);
+            //runMassAsync(this::txLoadCycle, 64, clients);
+
+        doSleep(2_000);
 
         LT.info(log, ">>> Half test time passed...");
 
@@ -572,16 +613,18 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
         //randomKeys = false;
 
+
+/*
         evictionRaceDetector.setEvictingPartIds(Stream.concat(
             Arrays.stream(PART_IDS1).boxed(),
             Arrays.stream(PART_IDS2).boxed()).collect(Collectors.toSet()));
 
         evictionRaceDetector.active = true; // TODO
-
+*/
         IgniteEx ignite3 = startGrid(3);
         LT.info(log, ">>> Node started: " + ignite3.name());
 
-        keyType = 3;
+        // keyType = 3;
 
         partIds = PART_IDS2;
 
@@ -594,7 +637,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         // log.info("Evicting partition ids: " + evictingPartIds);
         // evictionRaceDetector.setEvictingPartIds(evictingPartIds);
 
-        doSleep(5_000);
+        doSleep(2_000);
 
         stopLoad = true;
 
@@ -638,15 +681,6 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
             LT.info(log, Arrays.toString(keys1));
             LT.info(log, Arrays.toString(keys2));
         }
-    }
-
-    /**
-     * @param ignite Ignite.
-     * @param cacheName Cache name.
-     * @return List of local partitions.
-     */
-    private static List<GridDhtLocalPartition> localPartitions(IgniteEx ignite, String cacheName) {
-        return ignite.cachex(cacheName).context().topology().localPartitions();
     }
 
     /**
@@ -705,7 +739,20 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                     " -> " + entry.getValue().getClass().getName());
             }
         }
+    }
 
+    private void addNSGRLogging(Set<Integer> top2To3, IgniteEx... nodes) {
+        Arrays.asList(nodes).forEach(node -> {
+            GridCacheContext<?, ?> cacheCtx = node.cachex(DEFAULT_CACHE_NAME).context();
+
+            addBeforeCacheHandlers(cacheCtx,
+                new T3<>(cacheCtx.cacheId(), GridNearSingleGetRequest.class, ((uuid, msg) -> {
+                    GridNearSingleGetRequest req = (GridNearSingleGetRequest)msg;
+
+                    System.out.println("  ^^ " + node.name() + "@NSGR part/key: " + req.key().partition() + "/" + req.key().value(null, false) +
+                        (top2To3.contains(req.key().partition()) ? ", 2-3" : ", 3-4") + ", uuid: " + uuid);
+                })));
+        });
     }
 
     /**
@@ -837,6 +884,9 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                 return partIds[nextRandom(0, partIds.length)] + 1024 * nextRandom(0, 64);
 
+            case 4:
+                return keyFn1.getAsInt();
+
             default:
                 throw new IllegalStateException("Invalid keyType: " + keyType);
         }
@@ -865,6 +915,9 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 int[] partIds = this.partIds;
 
                 return partIds[nextRandom(0, partIds.length)] + 1024 * nextRandom(0, 64);
+
+            case 4:
+                return keyFn2.getAsInt();
 
             default:
                 throw new IllegalStateException("Invalid keyType: " + keyType);
