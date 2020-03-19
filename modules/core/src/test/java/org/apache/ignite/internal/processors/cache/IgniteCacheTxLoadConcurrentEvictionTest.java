@@ -39,11 +39,13 @@ import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteInterruptedException;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
+import org.apache.ignite.internal.processors.affinity.AffinityTopologyVersion;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtTxFinishRequest;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridPartitionedSingleGetFuture;
 import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
@@ -161,6 +163,8 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         /** */
         private final GridCacheContext<?, ?> cacheCtx;
         /** */
+        private final IgniteLogger log;
+        /** */
         private final GridDhtPartitionTopologyImpl.PartitionFactory spyPartFactory;
         /** */
         private final Map<Integer, T2<AtomicInteger, CountDownLatch[]>> partOps = new ConcurrentHashMap<>();
@@ -180,6 +184,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
          */
         EvictionRaceDetector(GridCacheContext<?, ?> cacheCtx) {
             this.cacheCtx = cacheCtx;
+            log = cacheCtx.logger(getClass());
 
             maxConcurrentRequestsAwaiting = cacheCtx.kernalContext().config().getStripedPoolSize() / 2 - 1;
 
@@ -200,6 +205,8 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
             Mockito.doAnswer(invocation -> {
                 GridDhtLocalPartition part = invocation.getArgumentAt(1, GridDhtLocalPartition.class);
+
+                System.out.println(U.format(new Date(), "HH:mm:ss,SSS") + "  -- Evicting partition id: " + part.id());
 
                 CountDownLatch latch = active ? beforeEvictPartitionAsync(part) : null;
 
@@ -465,8 +472,6 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         private CountDownLatch beforeEvictPartitionAsync(GridDhtLocalPartition part) throws InterruptedException {
             CountDownLatch latch = null;
 
-            log.info("Evicting partition id: " + part.id());
-
             if (evictingPartIds.contains(part.id())) {
                 T2<AtomicInteger, CountDownLatch[]> partOpState = partOps.computeIfAbsent(
                     part.id(),
@@ -526,16 +531,19 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         startGrid(4);
         awaitPartitionMapExchange();
         Set<Integer> top4PartIds = partIds(cacheCtx1.topology().localPartitions());
+        AffinityTopologyVersion top4Ver = cacheCtx1.affinity().affinityTopologyVersion();
 
-        //EvictionRaceDetector evictionRaceDetector = new EvictionRaceDetector(cacheCtx1);
+        EvictionRaceDetector evictionRaceDetector = new EvictionRaceDetector(cacheCtx1);
 
         stopGrid(4);
         awaitPartitionMapExchange();
         Set<Integer> top3PartIds = partIds(cacheCtx1.topology().localPartitions());
+        AffinityTopologyVersion top3Ver = cacheCtx1.affinity().affinityTopologyVersion();
 
         stopGrid(3);
         awaitPartitionMapExchange();
         Set<Integer> top2PartIds = partIds(cacheCtx1.topology().localPartitions());
+        AffinityTopologyVersion top2Ver = cacheCtx1.affinity().affinityTopologyVersion();
 
         Set<Integer> evictingTop2To3PartIds = new HashSet<>(top2PartIds);
         evictingTop2To3PartIds.removeAll(top3PartIds);
@@ -544,26 +552,63 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         Set<Integer> evictingTop3To4PartIds = new HashSet<>(top3PartIds);
         evictingTop3To4PartIds.removeAll(top4PartIds);
         System.out.println("  ## top3to4: " + Arrays.toString(evictingTop3To4PartIds.stream().mapToInt(Integer::intValue).sorted().toArray()));
-
+/*
         Set<Integer> evictingTop2To4PartIds = new HashSet<>(evictingTop2To3PartIds);
         evictingTop2To4PartIds.addAll(evictingTop3To4PartIds);
-
+*/
         // evictingPartIds.removeIf(v -> v < 105 || v > 997); // FIXME ?
 
-        int[] e2To4PartIds = evictingTop2To4PartIds.stream().mapToInt(Integer::intValue).sorted().toArray();
+        int[] evictingPartIds = evictingTop3To4PartIds.stream().mapToInt(Integer::intValue).sorted().toArray();
 
+        System.out.println("  ## evicting part ids: " + evictingPartIds.length);
+        for (int p : evictingPartIds) {
+            String p2 = cacheCtx1.affinity().primaryByPartition(p, top2Ver).id().toString();
+            String p3 = cacheCtx1.affinity().primaryByPartition(p, top3Ver).id().toString();
+            String p4 = cacheCtx1.affinity().primaryByPartition(p, top4Ver).id().toString();
+
+            System.out.println("  " + p + ": " +
+                p2.charAt(p2.length() - 1) + "/" +
+                p3.charAt(p3.length() - 1) + "/" +
+                p4.charAt(p4.length() - 1));
+        }
+
+/*
         AtomicInteger partIdsIdx = new AtomicInteger();
 
         keyFn1 = () -> {
             while (true) {
                 int i = partIdsIdx.get();
 
-                if (partIdsIdx.compareAndSet(i, i + 1 >= e2To4PartIds.length ? 0 : i + 1))
-                    return e2To4PartIds[i];
+                if (partIdsIdx.compareAndSet(i, i + 1 >= evictingPartIds.length ? 0 : i + 1))
+                    return evictingPartIds[i];
             }
         };
 
         keyFn2 = keyFn1;
+*/
+        AtomicInteger threadIdx = new AtomicInteger();
+        ThreadLocal<Integer> tlIdx = ThreadLocal.withInitial(threadIdx::getAndIncrement);
+        ThreadLocal<AtomicInteger> tlItr = ThreadLocal.withInitial(AtomicInteger::new);
+
+        keyFn1 = () -> {
+            int idx = tlIdx.get();
+
+            if (idx >= evictingPartIds.length)
+                idx = ThreadLocalRandom.current().nextInt(evictingPartIds.length);
+
+            return evictingPartIds[idx] + tlItr.get().getAndIncrement() * 1024; // FIXME partition count!
+        };
+
+        keyFn2 = () -> {
+            int idx = tlIdx.get();
+
+            idx = idx % 2 == 0 ? idx + 1 : idx - 1;
+
+            if (idx >= evictingPartIds.length)
+                idx = ThreadLocalRandom.current().nextInt(evictingPartIds.length);
+
+            return evictingPartIds[idx] + tlItr.get().get() * 1024; // FIXME partition count!
+        };
 
 
         clientMode = true;
@@ -578,7 +623,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         LT.info(log, ">>> Initial topology started...");
 
 
-        addNSGRLogging(evictingTop2To3PartIds, grid(1), grid(2));
+        addNSGRLogging(evictingTop3To4PartIds, grid(1), grid(2));
 
         /*addBeforeCacheHandlers(cacheCtx1,
             new T3<>(cacheCtx1.cacheId(), GridNearSingleGetRequest.class, ((uuid, msg) -> {
@@ -591,10 +636,10 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         keyType = 4;
 
         IgniteInternalFuture<Long> txLoadFinishFut =
-            runMassAsync(this::txLoadCycle, 1, clients[0]);
+            runMassAsync(this::txLoadCycle, 48, clients);
             //runMassAsync(this::txLoadCycle, 64, clients);
 
-        doSleep(2_000);
+        //doSleep(2_000);
 
         LT.info(log, ">>> Half test time passed...");
 
@@ -741,7 +786,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
         }
     }
 
-    private void addNSGRLogging(Set<Integer> top2To3, IgniteEx... nodes) {
+    private void addNSGRLogging(Set<Integer> top3To4, IgniteEx... nodes) {
         Arrays.asList(nodes).forEach(node -> {
             GridCacheContext<?, ?> cacheCtx = node.cachex(DEFAULT_CACHE_NAME).context();
 
@@ -749,9 +794,41 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                 new T3<>(cacheCtx.cacheId(), GridNearSingleGetRequest.class, ((uuid, msg) -> {
                     GridNearSingleGetRequest req = (GridNearSingleGetRequest)msg;
 
-                    System.out.println("  ^^ " + node.name() + "@NSGR part/key: " + req.key().partition() + "/" + req.key().value(null, false) +
-                        (top2To3.contains(req.key().partition()) ? ", 2-3" : ", 3-4") + ", uuid: " + uuid);
-                })));
+                    AffinityTopologyVersion topVer = req.topologyVersion();
+
+                    if (node.name().endsWith("1")) {
+                        String nid = cacheCtx.affinity().primaryByPartition(req.key().partition(), topVer).id().toString();
+
+                        System.out.println(U.format(new Date(), "HH:mm:ss,SSS") + "  ^^ " + node.name() + "@NSGR primary/part/key: " +
+                            nid.charAt(nid.length() - 1) + "/" + req.key().partition() + "/" + req.key().value(null, false) +
+                            (top3To4.contains(req.key().partition()) ? ", 3-4" : ", 2-3") + ", uuid: " + uuid);
+                    }
+                })),
+                new T3<>(0, GridDhtTxFinishRequest.class, ((uuid, msg) -> {
+                    GridDhtTxFinishRequest req = (GridDhtTxFinishRequest)msg;
+
+                    AffinityTopologyVersion topVer = req.topologyVersion();
+
+                    IgniteInternalTx tx = cacheCtx.shared().tm().tx(req.version());
+
+                    if (node.name().endsWith("1")) {
+                        if (tx != null && tx.writeEntries() != null) {
+                            System.out.println(U.format(new Date(), "HH:mm:ss,SSS") + "  >> tx.xid: " + tx.xid());
+
+                            for (IgniteTxEntry txEntry : tx.writeEntries()) {
+                                KeyCacheObject key = txEntry.key();
+
+                                String nid = cacheCtx.affinity().primaryByPartition(key.partition(), topVer).id().toString();
+
+                                System.out.println(U.format(new Date(), "HH:mm:ss,SSS") + "  ** " + node.name() + "@DTFR primary/part/key/: " +
+                                    nid.charAt(nid.length() - 1) + "/" + key.partition() + "/" + key.value(null, false) +
+                                    (top3To4.contains(key.partition()) ? ", 3-4" : ", 2-3") + ", uuid: " + uuid);
+                            }
+                        }
+
+                    }
+                }))
+            );
         });
     }
 
