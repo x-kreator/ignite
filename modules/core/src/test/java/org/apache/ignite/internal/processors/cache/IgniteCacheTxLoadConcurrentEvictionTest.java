@@ -314,7 +314,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                             continue;
                         }
 
-                        if (enterState(awaitingTxFinishes, partOpState.get1(), 1)) {
+                        if (partOpState.get1().get() == 2 && enterState(awaitingTxFinishes, partOpState.get1(), 1)) {
                             logPartOpState("1.1", partId, partOpState);
 
                             int awaiting = 0;
@@ -334,7 +334,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                             }
 
                             try {
-                                if (!partOpState.get2()[0].await(20, TimeUnit.SECONDS)) {
+                                if (!partOpState.get2()[0].await(1, TimeUnit.SECONDS)) {
                                     if (leaveState(partOpState.get1(), 1)) {
                                         logPartOpState("1.t", partId, partOpState);
 
@@ -388,7 +388,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
             keyGetCounts.compute(key, (k, cnt) -> cnt != null ? cnt + 1 : 1);
 
             if (evictingPartIds.contains(partId)) {
-                System.out.println("  >>> partId: " + partId + ", key: " + key);
+                // System.out.println("  >>> partId: " + partId + ", key: " + key);
 
                 if (!active) // FIXME
                     return;
@@ -408,7 +408,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                     logPartOpState("2.1", partId, partOpState);
 
-                    int i = 0;
+                    /*int i = 0;
                     int[] singleGetPartIds = new int[maxConcurrentRequestsAwaiting];
 
                     for (Map.Entry<Integer, T2<AtomicInteger, CountDownLatch[]>> entry : partOps.entrySet()) {
@@ -425,10 +425,10 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
                             break;
                         }
-                    }
+                    }*/
 
                     try {
-                        if (!partOpState.get2()[1].await(30, TimeUnit.SECONDS)) {
+                        if (!partOpState.get2()[1].await(300, TimeUnit.MILLISECONDS)) {
                             if (leaveState(partOpState.get1(), 2)) {
                                 logPartOpState("2.t", partId, partOpState);
 
@@ -461,7 +461,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
                         });
 
                         return newPart;
-                    }).when(spyPartFactory).create(Mockito.any(), Mockito.any(), partId);
+                    }).when(spyPartFactory).create(Mockito.any(), Mockito.any(), Mockito.eq(partId));
                 }
                 else
                     logPartOpState("2.0", partId, partOpState);
@@ -575,6 +575,7 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
             System.out.println("  " + p + ": " + p2 + "/" + p3 + "/" + p4);
         }
 
+        evictionRaceDetector.setEvictingPartIds(Arrays.stream(evictingPartIds).boxed().collect(Collectors.toList()));
 /*
         AtomicInteger partIdsIdx = new AtomicInteger();
 
@@ -690,6 +691,8 @@ public class IgniteCacheTxLoadConcurrentEvictionTest extends GridCommonAbstractT
 
         IgniteEx ignite4 = startGrid(4);
         LT.info(log, ">>> Node started: " + ignite4.name());
+
+        evictionRaceDetector.active = true; // TODO
 
         // Set<Integer> evictingPartIds = Arrays.stream(partIds).boxed().collect(Collectors.toSet());
         // log.info("Evicting partition ids: " + evictingPartIds);
