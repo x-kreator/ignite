@@ -624,7 +624,7 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
     private static final CallTracker CACHED_TRACKER = CallTracker.named("IgniteTxEntry.cached(e)");
 
     /** */
-    private volatile CallTracker.Track cachedTrack;
+    public volatile CallTracker.Track cachedTrack;
 
     /** */
     public volatile String cachedTrackNodes;
