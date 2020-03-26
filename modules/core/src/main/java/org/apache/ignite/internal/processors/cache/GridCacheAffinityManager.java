@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.binary.BinaryObject;
@@ -225,6 +226,22 @@ public class GridCacheAffinityManager extends GridCacheManagerAdapter {
             throw new IgniteException(FAILED_TO_FIND_CACHE_ERR_MSG + cctx.name());
 
         return aff0.nodes(part, topVer);
+    }
+
+    /**
+     * @param part Partition.
+     * @param topVer Topology version.
+     * @param idChars Number of first (if positive) or last (if negative) chars of each node id.
+     * @return Joined with '-' last 4 chars of affinity nodes ids.
+     */
+    public String nodesByPartStr(int part, AffinityTopologyVersion topVer, int idChars) {
+        List<ClusterNode> nodes = nodesByPartition(part, topVer);
+
+        return nodes.stream()
+            .map(ClusterNode::id)
+            .map(UUID::toString)
+            .map(n -> idChars < 0 ? n.substring(n.length() + idChars) : n.substring(0, idChars))
+            .collect(Collectors.joining("-"));
     }
 
     /**

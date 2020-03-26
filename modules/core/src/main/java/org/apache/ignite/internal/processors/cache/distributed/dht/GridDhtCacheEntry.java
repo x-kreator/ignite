@@ -41,6 +41,7 @@ import org.apache.ignite.internal.processors.cache.distributed.dht.topology.Grid
 import org.apache.ignite.internal.processors.cache.extras.GridCacheObsoleteEntryExtras;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteInternalTx;
 import org.apache.ignite.internal.processors.cache.version.GridCacheVersion;
+import org.apache.ignite.internal.util.CallTracker;
 import org.apache.ignite.internal.util.lang.GridPlainRunnable;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.tostring.GridToStringInclude;
@@ -76,6 +77,15 @@ public class GridDhtCacheEntry extends GridDistributedCacheEntry {
     @GridToStringExclude
     private final GridDhtLocalPartition locPart;
 
+    /** */
+    private static final CallTracker NEW_TRACKER = CallTracker.named("GDCE::new");
+
+    /** */
+    public final CallTracker.Track newTrack;
+
+    /** */
+    public final String newTrackNodes;
+
     /**
      * @param ctx Cache context.
      * @param topVer Topology version at the time of creation (if negative, then latest topology is assumed).
@@ -94,6 +104,9 @@ public class GridDhtCacheEntry extends GridDistributedCacheEntry {
         locPart = ctx.topology().localPartition(p, topVer, true, true);
 
         assert locPart != null : p;
+
+        newTrack = NEW_TRACKER.track();
+        newTrackNodes = ctx.affinity().nodesByPartStr(p, topVer, 4);
     }
 
     /** {@inheritDoc} */

@@ -626,6 +626,9 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
     /** */
     private volatile CallTracker.Track cachedTrack;
 
+    /** */
+    public volatile String cachedTrackNodes;
+
     /**
      * @param entry Cache entry.
      */
@@ -635,8 +638,7 @@ public class IgniteTxEntry implements GridPeerDeployAware, Message {
             ", ctxNear=" + ctx.isNear() +
             ", ctxDht=" + ctx.isDht() + ']';
 
-        if (this.entry == null)
-            cachedTrack = CACHED_TRACKER.track();
+        cachedTrack = CACHED_TRACKER.track();
 
         this.entry = entry;
     }

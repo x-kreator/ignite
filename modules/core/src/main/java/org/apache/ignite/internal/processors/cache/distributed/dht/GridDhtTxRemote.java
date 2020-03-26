@@ -326,6 +326,9 @@ public class GridDhtTxRemote extends GridDistributedTxRemoteAdapter {
             // Initialize cache entry.
             entry.cached(cached);
 
+            entry.cachedTrackNodes = cacheCtx.affinity().nodesByPartStr( // FIXME debug
+                cacheCtx.affinity().partition(entry.key()), topologyVersion(), 4);
+
             txState.addWriteEntry(entry.txKey(), entry);
 
             addExplicit(entry);
