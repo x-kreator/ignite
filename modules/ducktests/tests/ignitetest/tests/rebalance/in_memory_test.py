@@ -16,7 +16,7 @@
 """
 Module contains in-memory rebalance tests.
 """
-from ducktape.mark import defaults
+from ducktape.mark import defaults, matrix, parametrize
 
 from ignitetest.services.ignite import IgniteService
 from ignitetest.services.utils.ignite_configuration import IgniteConfiguration, DataStorageConfiguration
@@ -39,6 +39,14 @@ class RebalanceInMemoryTest(RebalanceTest):
     @ignite_versions(str(DEV_BRANCH), str(LATEST))
     @defaults(cache_count=[1], entry_count=[2000], entry_size=[300000],
               rebalance_thread_pool_size=[2], rebalance_batch_size=[512 * 1024], rebalance_throttle=[0])
+    @matrix(rebalance_thread_pool_size=[2, 4, 6], rebalance_batch_size=[512 * 1024, 1024 * 1024],
+            rebalance_throttle=[0, 10, 100])
+    @matrix(entry_count=[30000], entry_size=[20000],
+            rebalance_thread_pool_size=[2, 4, 6], rebalance_batch_size=[512 * 1024, 1024 * 1024],
+            rebalance_throttle=[0, 10, 100])
+    @parametrize(entry_count=50000, entry_size=10000)
+    @parametrize(entry_count=50000, entry_size=15000)
+    @parametrize(entry_count=50000, entry_size=20000)
     def test_rebalance_on_node_join(self, ignite_version,
                                     cache_count, entry_count, entry_size,
                                     rebalance_thread_pool_size, rebalance_batch_size, rebalance_throttle):
@@ -76,6 +84,14 @@ class RebalanceInMemoryTest(RebalanceTest):
     @ignite_versions(str(DEV_BRANCH), str(LATEST))
     @defaults(cache_count=[1], entry_count=[2000], entry_size=[300000],
               rebalance_thread_pool_size=[2], rebalance_batch_size=[512 * 1024], rebalance_throttle=[0])
+    @matrix(rebalance_thread_pool_size=[2, 4, 6], rebalance_batch_size=[512 * 1024, 1024 * 1024],
+            rebalance_throttle=[0, 10, 100])
+    @parametrize(entry_count=30000, entry_size=10000)
+    @matrix(entry_count=[40000], entry_size=[5000],
+            rebalance_thread_pool_size=[2, 4, 6], rebalance_batch_size=[512 * 1024, 1024 * 1024],
+            rebalance_throttle=[0, 10, 100])
+    @parametrize(entry_count=40000, entry_size=7500)
+    @parametrize(entry_count=40000, entry_size=9999)
     def test_rebalance_on_node_left(self, ignite_version,
                                     cache_count, entry_count, entry_size,
                                     rebalance_thread_pool_size, rebalance_batch_size, rebalance_throttle):
