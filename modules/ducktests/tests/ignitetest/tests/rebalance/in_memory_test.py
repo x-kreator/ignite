@@ -39,8 +39,7 @@ class RebalanceInMemoryTest(RebalanceTest):
     @ignite_versions(str(DEV_BRANCH), str(LATEST))
     @defaults(cache_count=[1], entry_count=[2000], entry_size=[300000],
               rebalance_thread_pool_size=[2], rebalance_batch_size=[512 * 1024], rebalance_throttle=[0])
-    @matrix(entry_count=[100000, 200000, 400000, 600000], entry_size=[10000, 20000, 40000, 60000, 80000],
-            rebalance_thread_pool_size=[2, 4], rebalance_batch_size=[512 * 1024, 1024 * 1024])
+    @matrix(entry_count=[100000, 200000], entry_size=[10000, 20000])
     def test_rebalance_on_node_join(self, ignite_version,
                                     cache_count, entry_count, entry_size,
                                     rebalance_thread_pool_size, rebalance_batch_size, rebalance_throttle):
@@ -78,8 +77,7 @@ class RebalanceInMemoryTest(RebalanceTest):
     @ignite_versions(str(DEV_BRANCH), str(LATEST))
     @defaults(cache_count=[1], entry_count=[2000], entry_size=[300000],
               rebalance_thread_pool_size=[2], rebalance_batch_size=[512 * 1024], rebalance_throttle=[0])
-    @matrix(entry_count=[100000, 200000, 400000, 600000], entry_size=[10000, 20000, 40000, 60000, 80000],
-            rebalance_thread_pool_size=[2, 4], rebalance_batch_size=[512 * 1024, 1024 * 1024])
+    @matrix(entry_count=[100000, 200000], entry_size=[10000, 20000])
     def test_rebalance_on_node_left(self, ignite_version,
                                     cache_count, entry_count, entry_size,
                                     rebalance_thread_pool_size, rebalance_batch_size, rebalance_throttle):
