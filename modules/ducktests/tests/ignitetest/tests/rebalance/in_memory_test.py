@@ -54,8 +54,10 @@ class RebalanceInMemoryTest(IgniteTest):
               backups=[1], cache_count=[1], entry_count=[15000], entry_size=[50000],
               rebalance_thread_pool_size=[None], rebalance_batch_size=[None],
               rebalance_batches_prefetch_count=[None], rebalance_throttle=[None])
-    @matrix(entry_count=[120000000], entry_size=[1000], rebalance_thread_pool_size=[2, 4, 8, 16])
-    @matrix(entry_count=[2400000], entry_size=[50000], rebalance_thread_pool_size=[2, 4, 8, 16])
+    @matrix(entry_count=[120000000], entry_size=[1000], rebalance_thread_pool_size=[2, 4, 8, 16],
+            rebalance_batches_prefetch_count=[3, 10])
+    @matrix(entry_count=[2400000], entry_size=[50000], rebalance_thread_pool_size=[2, 4, 8, 16],
+            rebalance_batches_prefetch_count=[3, 10])
     def test(self, ignite_version, trigger_event,
              backups, cache_count, entry_count, entry_size,
              rebalance_thread_pool_size, rebalance_batch_size,
